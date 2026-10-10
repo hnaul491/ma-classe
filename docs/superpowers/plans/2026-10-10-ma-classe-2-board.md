@@ -1673,6 +1673,200 @@ git commit -m "feat(room): board stage with control-bar toggle, kept mounted for
 
 ---
 
+### Task 9: Documents library and "Add to board"
+
+Added 2026-10-10 at the user's request: a place to see every uploaded document, and a way to re-use one on the current board without uploading it again.
+
+**Files:**
+- Create: `supabase/migrations/0004_documents.sql`
+- Create: `src/features/documents/group.ts` and test `src/features/documents/group.test.ts`
+- Modify:
+  - `src/features/board/upload.ts`: `uploadBoardImage` gains a `doc` argument
+  - `src/features/board/persistence.ts`: `loadBoard` loads files by the ids the scene uses; adds `loadDocumentFiles`
+  - `src/features/stage/Board.tsx`: document id on upload, `placeExisting`, the Add menu, and the `?add=` param
+- Create:
+  - `src/features/documents/DocumentsBrowser.tsx`: grid, search and viewer; also works as a picker
+  - `src/app/documents/page.tsx`
+- Modify:
+  - `src/app/page.tsx`: header link "Documents"
+  - `src/lib/i18n/messages.ts`
+
+**Interfaces (produces):**
+- New columns:
+  - `files.document_id uuid null`. A null value means the file is its own document.
+  - `files.page_index int not null default 0`.
+- Types:
+  - `type FileRow = { id; lesson_id; storage_path; kind: 'page'|'image'; width; height; name; created_at; document_id: string|null; page_index }`
+  - `type DocumentGroup = { id; name; lessonId; createdAt; kind: 'pdf'|'image'; pages: FileRow[] }`
+- `groupDocuments(rows): DocumentGroup[]`: newest first, pages sorted by `page_index`.
+- `filterDocuments(docs, query): DocumentGroup[]`: name match that ignores case and accents.
+- `uploadBoardImage(lessonId, page, kind, name, doc?: { documentId; pageIndex })`
+- `loadDocumentFiles(documentId): Promise<FileRow[]>`
+- `<DocumentsBrowser docs thumbs lessonDates liveLessonId? onPick? />`
+- Route `/documents`.
+- The board reads `?add=<documentId>` once, after the first load.
+
+- [ ] **Step 1: Migration (USER ACTION: the user runs it in the Supabase SQL Editor)**
+
+`supabase/migrations/0004_documents.sql`:
+```sql
+-- Group the pages of one uploaded PDF into a single document.
+alter table public.files add column if not exists document_id uuid;
+alter table public.files add column if not exists page_index int not null default 0;
+create index if not exists files_document on public.files (document_id);
+```
+
+- [ ] **Step 2: Failing tests** in `src/features/documents/group.test.ts`. Cover these cases:
+  - **Pages stay together:** the pages of one PDF form a single document, in page order. Use `page_index` 1 and then 0, and expect ids `['a','b']` with kind `pdf`.
+  - **No document id:** a row with a null `document_id` and kind `image` becomes its own document, with its own id as the document id and kind `image`.
+  - **Order:** the newest document comes first.
+  - **Search:** `filterDocuments` matches `'PASSE'` → "Passé composé.pdf" and `'marche'` → "Vocabulaire marché.pdf". A blank query returns everything.
+
+Run `npm test -- src/features/documents`. Expected: FAIL.
+
+- [ ] **Step 3: Implement** `src/features/documents/group.ts`:
+```ts
+export type FileRow = {
+  id: string; lesson_id: string; storage_path: string; kind: 'page' | 'image';
+  width: number; height: number; name: string; created_at: string;
+  document_id: string | null; page_index: number;
+};
+export type DocumentGroup = { id: string; name: string; lessonId: string; createdAt: string; kind: 'pdf' | 'image'; pages: FileRow[] };
+
+export function groupDocuments(rows: readonly FileRow[]): DocumentGroup[] {
+  const byId = new Map<string, DocumentGroup>();
+  for (const r of rows) {
+    const id = r.document_id ?? r.id;
+    let doc = byId.get(id);
+    if (!doc) {
+      doc = { id, name: r.name, lessonId: r.lesson_id, createdAt: r.created_at, kind: r.kind === 'page' ? 'pdf' : 'image', pages: [] };
+      byId.set(id, doc);
+    }
+    if (r.created_at < doc.createdAt) doc.createdAt = r.created_at;
+    doc.pages.push(r);
+  }
+  const docs = [...byId.values()];
+  for (const d of docs) d.pages.sort((a, b) => a.page_index - b.page_index);
+  return docs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+export function filterDocuments(docs: readonly DocumentGroup[], query: string): DocumentGroup[] {
+  const q = fold(query.trim());
+  return q ? docs.filter((d) => fold(d.name).includes(q)) : [...docs];
+}
+```
+Run the tests again. Expected: PASS.
+
+- [ ] **Step 4: Upload and load**
+
+**`uploadBoardImage`** takes a last optional `doc?: { documentId: string; pageIndex: number }` and inserts `document_id: doc?.documentId ?? null` and `page_index: doc?.pageIndex ?? 0`.
+
+**`loadBoard`** loads files by the `fileId`s referenced in the saved scene, instead of by `lesson_id`. This way, documents reused from older lessons come back after a reload too:
+```ts
+const save = await supabase.from('board_saves').select('scene').eq('lesson_id', lessonId).maybeSingle();
+if (save.error) throw new Error('Could not load the board', { cause: save.error });
+const elements = (save.data?.scene as { elements?: BoardElement[] } | undefined)?.elements ?? [];
+const fileIds = [...new Set(elements.map((e) => e.fileId).filter((id): id is string => typeof id === 'string'))];
+if (fileIds.length === 0) return { elements, files: [] };
+const files = await supabase.from('files').select('id, storage_path, mime, width, height').in('id', fileIds);
+if (files.error) throw new Error('Could not load board files', { cause: files.error });
+return { elements, files: (files.data ?? []) as StoredFile[] };
+```
+
+**Add `loadDocumentFiles(documentId)`.** It selects the `FileRow` columns where `document_id = documentId` or `id = documentId`, ordered by `page_index`, and throws on error.
+
+- [ ] **Step 5: Board**
+
+Read the current `Board.tsx` first. Then make these changes:
+
+1. **Document id on upload.** In `placePages`, create one `documentId = crypto.randomUUID()` per call and pass `{ documentId, pageIndex: i }` to `uploadBoardImage`.
+2. **Shared page helper.** Factor the "create image (+ frame) elements for one page box" code into a helper that both `placePages` and the new `placeExisting` use (DRY).
+3. **`placeExisting(rows: FileRow[])`.** Same layout as `placePages`: PDFs become frames stacked below the existing content, and an image goes at the view centre. For each row, with no upload:
+   - `await addFileFromStorage(row.id, row.storage_path, 'image/webp')`;
+   - send `{ t: 'file', fileId: row.id, path: row.storage_path, mime: 'image/webp', width: row.width, height: row.height }`;
+   - create the elements with `fileId: row.id`.
+4. **Add menu.** Replace the single upload button with a small **Add** menu button (`board.add`). Its items:
+   - `board.addUpload` opens the existing file input.
+   - `board.addFromDocuments` opens a `<dialog>` with `showModal()`. It closes with Esc or a Close button (`common.close`). The dialog:
+     - loads every `files` row (the `FileRow` columns);
+     - groups the rows with `groupDocuments`;
+     - gets signed thumbnails with `supabase.storage.from('lesson-files').createSignedUrls(firstPagePaths, 3600)`;
+     - renders `<DocumentsBrowser … onPick={(d) => { close(); void placeExisting(d.pages); }} />`.
+5. **`?add=`.** After the first-load effect has finished, if `new URLSearchParams(location.search).get('add')` is set:
+   - run `loadDocumentFiles(id).then(placeExisting)` exactly once, guarded with a ref so StrictMode cannot run it twice;
+   - then call `history.replaceState(null, '', location.pathname)`.
+   
+   On error, call `onError('board.uploadFailed')`.
+
+- [ ] **Step 6: Documents browser and page**
+
+**`DocumentsBrowser`** (client component). Props:
+- `docs: DocumentGroup[]`
+- `thumbs: Record<storage_path, signedUrl>`
+- `lessonDates: Record<lessonId, string>`, already formatted
+- `liveLessonId?: string`
+- `onPick?: (d) => void`
+
+It renders:
+- A search box (`.field`, aria-label `documents.search`) that runs `filterDocuments`.
+- A grid (`grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4`) of `.card` buttons. Each card shows:
+  - the first-page thumbnail (`aspect-[3/4] w-full object-cover object-top`, alt = name);
+  - the name, truncated;
+  - `documents.pages {n}`;
+  - the lesson date.
+- Card click:
+  - with `onPick`, it calls `onPick`;
+  - without `onPick`, it opens a viewer `<dialog>`.
+- The viewer:
+  - fetches signed URLs for all pages on open;
+  - shows the pages large, with `loading="lazy"`;
+  - has page buttons 1…n that scroll to that page, and ← / → keys;
+  - has a Close button (`common.close`);
+  - when `liveLessonId` is set, shows a primary link `documents.addToLesson` to `/lesson/${liveLessonId}?add=${doc.id}`.
+- Empty state: `documents.empty`.
+
+**`src/app/documents/page.tsx`** (server component):
+1. `getMember`. If there is no member, redirect to `/login?denied=1`.
+2. Load:
+   - all `files` rows (the `FileRow` columns);
+   - `lessons(id, started_at, status)`.
+   
+   Throw on any error so `error.tsx` handles it.
+3. Group the files with `groupDocuments`.
+4. Build signed URLs for the first pages with `createSignedUrls`. Skip this when the list is empty.
+5. Build `lessonDates` with `formatLessonDate(started_at, locale, timeZone)`.
+6. Render a header: the `Wordmark` linking to `/`, `ThemeSwitch` and `LanguageSwitch`. Then render `h1` `documents.title` and `<DocumentsBrowser … liveLessonId={live?.id} />`.
+
+**Home** (`src/app/page.tsx`): add `<Link href="/documents" className="btn btn-secondary btn-sm">{t('documents.title')}</Link>` to the header actions.
+
+- [ ] **Step 7: i18n (EN / FR)**
+
+| Key | EN | FR |
+|---|---|---|
+| `documents.title` | Documents | Documents |
+| `documents.search` | Search documents | Rechercher un document |
+| `documents.empty` | No documents yet. Add a PDF or an image on the board during a lesson. | Aucun document pour l’instant. Ajoutez un PDF ou une image au tableau pendant un cours. |
+| `documents.pages` | {n} pages | {n} pages |
+| `documents.addToLesson` | Add to today’s board | Ajouter au tableau du jour |
+| `board.add` | Add | Ajouter |
+| `board.addUpload` | Upload a PDF or image | Importer un PDF ou une image |
+| `board.addFromDocuments` | From my documents | Depuis mes documents |
+| `common.close` | Close | Fermer |
+
+- [ ] **Step 8: Verify and commit**
+
+Run: `npm test && npx tsc --noEmit && npm run lint && npm run build`. All must pass.
+
+Then commit:
+```bash
+git add -A
+git commit -m "feat(documents): documents library, viewer and re-use on the board"
+```
+
+---
+
 ## After Plan 2
 
 Run one real lesson with the board and a PDF worksheet. Then write Plan 3 (Google Drive class folder, synced media player) from spec §7 and the storage policy.
