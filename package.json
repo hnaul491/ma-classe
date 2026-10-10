@@ -12,12 +12,14 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
     "@livekit/components-react": "2.9.24",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.3",
     "livekit-client": "2.22.4",
     "livekit-server-sdk": "2.19.1",
     "next": "16.4.0",
+    "pdfjs-dist": "6.3.289",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
