@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { PLAN_B_URL } from '@/lib/env';
 import { getMember } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
+import { LessonClient } from './LessonClient';
 
 export default async function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,5 +25,5 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  return <main className="p-6">Room for {lesson.title} (Task 10)</main>;
+  return <LessonClient lessonId={lesson.id} member={member} planBUrl={PLAN_B_URL} />;
 }
