@@ -1,0 +1,155 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { DriveFile } from './classify';
+import { createDriveFetch, downloadDriveFile, DRIVE_API, DriveExportTooLarge, driveErrorReason, pickedFile } from './drive';
+
+function deps(responses: Response[], tokens = ['t1', 't2']) {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    void url;
+    void init;
+    const r = responses.shift();
+    if (!r) throw new Error('no more responses');
+    return r;
+  });
+  const getToken = vi.fn(async () => {
+    const t = tokens.shift();
+    if (!t) throw new Error('no more tokens');
+    return t;
+  });
+  const clearToken = vi.fn();
+  return { fetch, getToken, clearToken };
+}
+
+const auth = (init: RequestInit | undefined) => new Headers(init?.headers).get('Authorization');
+
+describe('createDriveFetch', () => {
+  it('calls the Drive v3 API with a Bearer token', async () => {
+    const d = deps([new Response('ok')]);
+    const res = await createDriveFetch(d)('files/abc?alt=media', { headers: { Accept: 'application/json' } });
+    expect(res.status).toBe(200);
+    const [url, init] = d.fetch.mock.calls[0];
+    expect(url).toBe(`${DRIVE_API}files/abc?alt=media`);
+    expect(auth(init)).toBe('Bearer t1');
+    expect(new Headers(init?.headers).get('Accept')).toBe('application/json');
+    expect(d.clearToken).not.toHaveBeenCalled();
+  });
+
+  it('never sends the token outside the Drive API, whatever the path', async () => {
+    const d = deps([new Response('ok'), new Response('ok')]);
+    await createDriveFetch(d)('/files/abc');
+    await createDriveFetch(d)('https://evil.example/x');
+    expect(d.fetch.mock.calls[0][0]).toBe(`${DRIVE_API}files/abc`);
+    expect(d.fetch.mock.calls[1][0].startsWith(DRIVE_API)).toBe(true);
+  });
+
+  it('on a 401, clears the token, gets a fresh one and retries once', async () => {
+    const d = deps([new Response('', { status: 401 }), new Response('ok')]);
+    const res = await createDriveFetch(d)('files/abc');
+    expect(res.status).toBe(200);
+    expect(d.clearToken).toHaveBeenCalledTimes(1);
+    expect(d.fetch).toHaveBeenCalledTimes(2);
+    expect(auth(d.fetch.mock.calls[0][1])).toBe('Bearer t1');
+    expect(auth(d.fetch.mock.calls[1][1])).toBe('Bearer t2');
+  });
+
+  it('retries only once: a second 401 is returned to the caller', async () => {
+    const d = deps([new Response('', { status: 401 }), new Response('', { status: 401 })]);
+    const res = await createDriveFetch(d)('files/abc');
+    expect(res.status).toBe(401);
+    expect(d.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry other errors', async () => {
+    const d = deps([new Response('', { status: 403 })]);
+    const res = await createDriveFetch(d)('files/abc');
+    expect(res.status).toBe(403);
+    expect(d.fetch).toHaveBeenCalledTimes(1);
+    expect(d.clearToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('driveErrorReason', () => {
+  it('reads the reason of a Drive error body', async () => {
+    const body = { error: { code: 403, message: 'This file is too large to be exported.', errors: [{ domain: 'global', reason: 'exportSizeLimitExceeded' }] } };
+    expect(await driveErrorReason(new Response(JSON.stringify(body), { status: 403 }))).toBe('exportSizeLimitExceeded');
+  });
+
+  it('is null for a body that is not a Drive error', async () => {
+    expect(await driveErrorReason(new Response('nope', { status: 500 }))).toBeNull();
+    expect(await driveErrorReason(new Response('{"error":{}}', { status: 500 }))).toBeNull();
+  });
+});
+
+describe('downloadDriveFile', () => {
+  const pdf: DriveFile = { id: 'p 1', name: 'Leçon.pdf', mimeType: 'application/pdf', sizeBytes: 100 };
+  const slides: DriveFile = { id: 's1', name: 'Unité 3', mimeType: 'application/vnd.google-apps.presentation', sizeBytes: null };
+
+  it('downloads a file with alt=media, keeping its name and type', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
+    const f = await downloadDriveFile(pdf, fetch);
+    expect(fetch.mock.calls[0]).toEqual(['files/p%201?alt=media&supportsAllDrives=true']);
+    expect(f.name).toBe('Leçon.pdf');
+    expect(f.type).toBe('application/pdf');
+    expect(f.size).toBe(3);
+  });
+
+  it('exports Docs and Slides to a PDF named after the file', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1])));
+    const f = await downloadDriveFile(slides, fetch);
+    expect(fetch.mock.calls[0]).toEqual(['files/s1/export?mimeType=application%2Fpdf']);
+    expect(f.name).toBe('Unité 3.pdf');
+    expect(f.type).toBe('application/pdf');
+  });
+
+  it('does not double the .pdf extension', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1])));
+    const f = await downloadDriveFile({ ...slides, name: 'notes.PDF' }, fetch);
+    expect(f.name).toBe('notes.PDF');
+  });
+
+  it('throws DriveExportTooLarge when the export is over the 10 MB limit', async () => {
+    const body = { error: { code: 403, errors: [{ reason: 'exportSizeLimitExceeded' }] } };
+    const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status: 403 }));
+    await expect(downloadDriveFile(slides, fetch)).rejects.toBeInstanceOf(DriveExportTooLarge);
+  });
+
+  it('throws a plain error for other failures', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 404 }));
+    const err = await downloadDriveFile(pdf, fetch).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(DriveExportTooLarge);
+  });
+
+  it('refuses a file it cannot handle, without fetching', async () => {
+    const fetch = vi.fn(async () => new Response(''));
+    await expect(downloadDriveFile({ ...pdf, mimeType: 'video/mp4' }, fetch)).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('pickedFile', () => {
+  it('reads id, name, mime and the size string from a Picker document', () => {
+    expect(pickedFile({ id: 'a', name: 'n.pdf', mimeType: 'application/pdf', sizeBytes: '2048', url: 'x' })).toEqual({
+      id: 'a',
+      name: 'n.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 2048,
+    });
+  });
+
+  it('uses null for a missing or bad size (Google-native files)', () => {
+    expect(pickedFile({ id: 'a', name: 'Doc', mimeType: 'application/vnd.google-apps.document' })?.sizeBytes).toBeNull();
+    expect(pickedFile({ id: 'a', name: 'Doc', mimeType: 'x', sizeBytes: 'abc' })?.sizeBytes).toBeNull();
+    expect(pickedFile({ id: 'a', name: 'Doc', mimeType: 'x', sizeBytes: '-5' })?.sizeBytes).toBeNull();
+    expect(pickedFile({ id: 'a', name: 'Doc', mimeType: 'x', sizeBytes: 12 })?.sizeBytes).toBe(12);
+  });
+
+  it('is null without an id', () => {
+    expect(pickedFile(undefined)).toBeNull();
+    expect(pickedFile({ name: 'n' })).toBeNull();
+    expect(pickedFile({ id: '', name: 'n', mimeType: 'x' })).toBeNull();
+  });
+
+  it('defaults a missing name and mime to empty strings', () => {
+    expect(pickedFile({ id: 'a' })).toEqual({ id: 'a', name: '', mimeType: '', sizeBytes: null });
+  });
+});
