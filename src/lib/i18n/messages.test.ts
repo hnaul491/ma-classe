@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en, fr, formatLessonDate, isMessageKey, pickLocale, translate } from './messages';
+import { en, fr, formatLessonDate, isMessageKey, isValidTimeZone, pickLocale, translate } from './messages';
 
 describe('translate', () => {
   it('returns the string for the chosen language', () => {
@@ -54,5 +54,20 @@ describe('formatLessonDate', () => {
   it('formats in Paris time for each language', () => {
     expect(formatLessonDate('2026-10-14T16:00:00Z', 'en')).toBe('14 Oct');
     expect(formatLessonDate('2026-10-14T16:00:00Z', 'fr')).toBe('14 oct.');
+  });
+
+  it('uses the viewer time zone, and falls back to Paris when it is invalid', () => {
+    expect(formatLessonDate('2026-10-14T20:00:00Z', 'en', 'Asia/Taipei')).toBe('15 Oct');
+    expect(formatLessonDate('2026-10-14T20:00:00Z', 'en', 'Europe/Paris')).toBe('14 Oct');
+    expect(formatLessonDate('2026-10-14T20:00:00Z', 'en', 'Mars/Olympus')).toBe('14 Oct');
+  });
+});
+
+describe('isValidTimeZone', () => {
+  it('accepts real zones only', () => {
+    expect(isValidTimeZone('Asia/Taipei')).toBe(true);
+    expect(isValidTimeZone('Mars/Olympus')).toBe(false);
+    expect(isValidTimeZone('')).toBe(false);
+    expect(isValidTimeZone(42)).toBe(false);
   });
 });

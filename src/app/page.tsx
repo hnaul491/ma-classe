@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
-import { getLocale, getT } from '@/lib/i18n/server';
+import { getLocale, getT, getTimeZone } from '@/lib/i18n/server';
 import type { Lesson } from '@/lib/lessons/types';
 import { createClient } from '@/lib/supabase/server';
 import { startLesson } from './actions';
@@ -18,6 +18,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const sp = await searchParams;
   const locale = await getLocale();
   const t = await getT();
+  const timeZone = await getTimeZone();
   const { member } = await getMember();
   if (!member) redirect('/login?denied=1');
 
@@ -48,7 +49,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
       <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5">
         {live ? (
           <>
-            <p className="font-semibold">{t('home.inProgress', { title: live.title })}</p>
+            <p className="font-semibold">{t('home.inProgress', { title: t('lesson.title', { date: formatLessonDate(live.started_at, locale, timeZone) }) })}</p>
             <Link href={`/lesson/${live.id}`} className="self-start rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
               {t('home.joinLesson')}
             </Link>
@@ -73,7 +74,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
           {past.map((l) => (
             <li key={l.id} className="flex justify-between gap-4 px-4 py-3">
-              <span>{t('lesson.title', { date: formatLessonDate(l.started_at, locale) })}</span>
+              <span>{t('lesson.title', { date: formatLessonDate(l.started_at, locale, timeZone) })}</span>
               <span className="text-sm tabular-nums text-muted">{t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}</span>
             </li>
           ))}

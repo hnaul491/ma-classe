@@ -191,10 +191,20 @@ export function isMessageKey(k: unknown): k is MessageKey {
   return typeof k === 'string' && Object.prototype.hasOwnProperty.call(en, k);
 }
 
-export function formatLessonDate(iso: string, locale: Locale): string {
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || tz === '') return false;
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function formatLessonDate(iso: string, locale: Locale, timeZone = 'Europe/Paris'): string {
   return new Date(iso).toLocaleDateString(locale === 'fr' ? 'fr-FR' : 'en-GB', {
     day: 'numeric',
     month: 'short',
-    timeZone: 'Europe/Paris',
+    timeZone: isValidTimeZone(timeZone) ? timeZone : 'Europe/Paris',
   });
 }
