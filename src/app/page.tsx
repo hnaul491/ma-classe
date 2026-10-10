@@ -8,15 +8,11 @@ import { Wordmark } from '@/components/Wordmark';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
 import { getLocale, getT, getThemePref, getTimeZone } from '@/lib/i18n/server';
+import { minutesBetween } from '@/lib/lessons/duration';
 import type { Lesson } from '@/lib/lessons/types';
 import { createClient } from '@/lib/supabase/server';
 import { startLesson } from './actions';
 import { LivePoller } from './LivePoller';
-
-function minutesBetween(a: string, b: string | null): number | null {
-  if (!b) return null;
-  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
-}
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ ended?: string }> }) {
   const sp = await searchParams;
@@ -29,11 +25,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   if (!member) redirect('/login?denied=1');
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('lessons')
-    .select('id, title, status, started_at, ended_at')
-    .order('started_at', { ascending: false })
-    .limit(50);
+  const now = new Date();
+  const since = monthStart(now).toISOString();
+  const [{ data, error }, usageLessons, usageFiles] = await Promise.all([
+    supabase.from('lessons').select('id, title, status, started_at, ended_at').order('started_at', { ascending: false }).limit(50),
+    supabase.from('lessons').select('started_at, ended_at').or(`ended_at.is.null,ended_at.gte.${since}`),
+    supabase.from('files').select('size_bytes'),
+  ]);
   // An outage goes to the error page, not to an empty "No lessons yet."
   if (error) throw new Error('Could not load lessons', { cause: error });
   const lessons = (data ?? []) as Lesson[];
@@ -41,18 +39,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const past = lessons.filter((l) => l.status === 'ended');
 
   // The meter is secondary: a failed load shows a note instead of breaking the page.
-  const since = monthStart(new Date()).toISOString();
-  const [usageLessons, usageFiles] = await Promise.all([
-    supabase.from('lessons').select('started_at, ended_at').or(`ended_at.is.null,ended_at.gte.${since}`),
-    supabase.from('files').select('size_bytes'),
-  ]);
   const usage =
     usageLessons.error || usageFiles.error
       ? null
       : estimateUsage({
           lessons: usageLessons.data ?? [],
           fileBytes: (usageFiles.data ?? []).map((f) => Number(f.size_bytes)),
-          now: new Date(),
+          now,
         });
 
   return (

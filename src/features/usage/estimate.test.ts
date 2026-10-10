@@ -48,10 +48,8 @@ describe('estimateUsage', () => {
   it('warns at 70% and flags over 100%', () => {
     const at70 = estimateUsage({ lessons: [], fileBytes: [0.71 * FREE_LIMITS.storageBytes], now });
     expect(get(at70, 'storage').level).toBe('warn');
-    expect(at70.warn).toBe(true);
     const over = estimateUsage({ lessons: [], fileBytes: [1.2 * FREE_LIMITS.storageBytes], now });
     expect(get(over, 'storage').level).toBe('over');
     expect(get(over, 'storage').ratio).toBeCloseTo(1.2);
-    expect(estimateUsage({ lessons: [], fileBytes: [10], now }).warn).toBe(false);
   });
 });

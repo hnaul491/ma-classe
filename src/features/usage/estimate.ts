@@ -8,7 +8,7 @@ const WARN_AT = 0.7;
 const PARTICIPANTS = 2;
 
 export type UsageItem = { key: 'minutes' | 'data' | 'storage'; used: number; limit: number; ratio: number; level: 'ok' | 'warn' | 'over' };
-export type Usage = { items: UsageItem[]; warn: boolean };
+export type Usage = { items: UsageItem[] };
 
 export const monthStart = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
@@ -41,10 +41,11 @@ export function estimateUsage({
   const participantMinutes = Math.round((ms / 60000) * PARTICIPANTS);
   const dataBytes = participantMinutes * 60 * ((BITRATE_MBPS * 1e6) / 8);
   const storage = fileBytes.reduce((a, b) => a + (Number.isFinite(b) && b > 0 ? b : 0), 0);
-  const items = [
-    item('minutes', participantMinutes, FREE_LIMITS.participantMinutes),
-    item('data', dataBytes, FREE_LIMITS.downstreamBytes),
-    item('storage', storage, FREE_LIMITS.storageBytes),
-  ];
-  return { items, warn: items.some((i) => i.level !== 'ok') };
+  return {
+    items: [
+      item('minutes', participantMinutes, FREE_LIMITS.participantMinutes),
+      item('data', dataBytes, FREE_LIMITS.downstreamBytes),
+      item('storage', storage, FREE_LIMITS.storageBytes),
+    ],
+  };
 }

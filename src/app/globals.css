@@ -12,6 +12,8 @@
   --pen-soft: #fbe6e4;
   --hl: #ffe57a;
   --hl-ink: #1a2230;
+  /* Usage meter fill near a limit: at least 3:1 against --surface-2. */
+  --warn: #b26a00;
   --good: #23784a;
   --good-soft: #e1f2e8;
   --blue: #2949c9;
@@ -30,6 +32,7 @@
   --pen-soft: #3a1f1f;
   --hl: #6b5815;
   --hl-ink: #fff3c4;
+  --warn: #e9a23b;
   --good: #5fc78d;
   --good-soft: #17301f;
   --blue: #8ea7ff;
@@ -49,6 +52,7 @@
     --pen-soft: #3a1f1f;
     --hl: #6b5815;
     --hl-ink: #fff3c4;
+    --warn: #e9a23b;
     --good: #5fc78d;
     --good-soft: #17301f;
     --blue: #8ea7ff;
@@ -72,6 +76,7 @@
   --color-pen-soft: var(--pen-soft);
   --color-hl: var(--hl);
   --color-hl-ink: var(--hl-ink);
+  --color-warn: var(--warn);
   --color-good: var(--good);
   --color-good-soft: var(--good-soft);
   --color-blue: var(--blue);
