@@ -59,6 +59,15 @@ Limits verified 2026-10-10:
 - LiveKit Build: 5,000 WebRTC minutes, 50 GB downstream, 100 concurrent connections per month.
 - Supabase Free: 500 MB database, 1 GB file storage, projects pause after 1 week of inactivity.
 
+Expected use: 2 lessons a week × 90 minutes × 2 people, so 9–10 lessons a month.
+
+| Limit | Expected use | Share of free limit |
+|---|---|---|
+| LiveKit video minutes | ~1,800 participant-minutes | ~36% |
+| LiveKit downstream data (540p) | ~11 GB | ~22% |
+
+The free plan covers about 27 such lessons a month.
+
 ## 5. Screens and layouts
 
 ### Pages
