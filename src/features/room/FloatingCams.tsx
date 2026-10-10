@@ -13,7 +13,7 @@ export function FloatingCams() {
       <button
         type="button"
         onClick={() => setHidden(false)}
-        className="fixed right-4 top-4 z-20 rounded-full bg-surface px-3 py-1 text-xs shadow"
+        className="fixed right-4 top-16 z-20 rounded-full bg-surface px-3 py-1 text-xs shadow"
       >
         Show cameras
       </button>
@@ -23,7 +23,7 @@ export function FloatingCams() {
   return (
     <div
       className="fixed z-20 w-36 cursor-grab touch-none rounded-lg bg-surface/90 shadow-xl active:cursor-grabbing"
-      style={pos ? { left: pos.x, top: pos.y } : { right: 16, top: 16 }}
+      style={pos ? { left: pos.x, top: pos.y } : { right: 16, top: 64 }}
       onPointerDown={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         drag.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };

@@ -1,7 +1,7 @@
 'use client';
 
 import { RoomAudioRenderer, useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
-import { RoomEvent, Track, type LocalTrackPublication, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
+import { RoomEvent, Track, type LocalTrackPublication, type Participant, type RemoteTrackPublication } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
 import { CameraTiles } from '@/features/stage/CameraTiles';
@@ -59,7 +59,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       const next = applyRemoteStage(prev, msg);
       if (next === prev) return;
       applyStage(next);
-      if (next.stage !== prev.stage) {
+      if (prev.by !== null && next.stage !== prev.stage) {
         showToast(`${msg.by === 'teacher' ? 'Teacher' : 'Student'} opened ${STAGE_LABEL[next.stage]}`);
       }
     },
@@ -71,20 +71,23 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
     (target: Stage) => {
       const next = localStageChange(stageRef.current, target, member.role);
       applyStage(next);
-      void send({ t: 'stage', stage: next.stage, lamport: next.lamport, by: member.role });
+      send({ t: 'stage', stage: next.stage, lamport: next.lamport, by: member.role }).catch(() => {});
     },
     [applyStage, member.role, send],
   );
 
   // Someone who joins late receives the current stage.
   useEffect(() => {
-    const onJoin = (p: RemoteParticipant) => {
+    const onJoin = (p: Participant) => {
+      if (p === room.localParticipant) return;
       const s = stageRef.current;
-      if (s.by) void send({ t: 'stage', stage: s.stage, lamport: s.lamport, by: s.by }, { to: [p.identity] });
+      if (s.by) send({ t: 'stage', stage: s.stage, lamport: s.lamport, by: s.by }, { to: [p.identity] }).catch(() => {});
     };
     room.on(RoomEvent.ParticipantConnected, onJoin);
+    room.on(RoomEvent.ParticipantActive, onJoin);
     return () => {
       room.off(RoomEvent.ParticipantConnected, onJoin);
+      room.off(RoomEvent.ParticipantActive, onJoin);
     };
   }, [room, send]);
 
@@ -93,7 +96,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
     const onRemotePublished = (pub: RemoteTrackPublication) => {
       const lp = room.localParticipant;
       if (shouldStopLocalShare(lp.isScreenShareEnabled, pub.source === Track.Source.ScreenShare)) {
-        void lp.setScreenShareEnabled(false);
+        lp.setScreenShareEnabled(false).catch(() => {});
       }
     };
     const onLocalUnpublished = (pub: LocalTrackPublication) => {
@@ -112,7 +115,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
 
   const toggleShare = useCallback(async () => {
     if (localParticipant.isScreenShareEnabled) {
-      await localParticipant.setScreenShareEnabled(false);
+      await localParticipant.setScreenShareEnabled(false).catch(() => {});
       return;
     }
     try {
@@ -165,7 +168,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
         ) : (
           <>
             <main className="min-w-0 flex-1">
-              <ScreenView onStop={() => void localParticipant.setScreenShareEnabled(false)} />
+              <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />
             </main>
             {fs.active ? (
               <FloatingCams />

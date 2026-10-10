@@ -11,7 +11,7 @@ import type { Member } from '@/lib/lessons/types';
 import { FatalError, withRetry } from '@/lib/retry';
 
 async function fetchToken(lessonId: string): Promise<{ token: string; url: string }> {
-  const res = await fetch(`/api/token?lesson=${encodeURIComponent(lessonId)}`);
+  const res = await fetch(`/api/token?lesson=${encodeURIComponent(lessonId)}`, { signal: AbortSignal.timeout(10000) });
   const body = (await res.json().catch(() => ({}))) as { token?: string; url?: string; error?: string };
   if (res.ok && body.token && body.url) return { token: body.token, url: body.url };
   if (res.status >= 400 && res.status < 500) throw new FatalError(body.error ?? 'You cannot join this lesson.');
@@ -35,7 +35,10 @@ export function LessonClient({ lessonId, member, planBUrl }: { lessonId: string;
 
   function onDisconnected(reason?: DisconnectReason) {
     if (reason === DisconnectReason.ROOM_DELETED) router.push('/?ended=1');
-    else if (reason === DisconnectReason.CLIENT_INITIATED) router.push('/');
+    else if (reason === DisconnectReason.DUPLICATE_IDENTITY) {
+      setConn(null);
+      setError('This lesson is open in another tab or window. Close it, then join here.');
+    } else if (reason === DisconnectReason.CLIENT_INITIATED) router.push('/');
     else {
       setConn(null);
       setError('You were disconnected. Join again, or use Plan B.');
