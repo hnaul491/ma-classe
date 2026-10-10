@@ -2,14 +2,16 @@ import { defineConfig, devices } from '@playwright/test';
 
 try {
   process.loadEnvFile('.env.local');
-} catch {
-  // CI provides the variables directly.
+} catch (err) {
+  // CI provides the variables directly; only a missing file is tolerated.
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
 }
 
 export default defineConfig({
   testDir: 'e2e',
   timeout: 120_000,
   workers: 1,
+  globalSetup: './e2e/global-setup.ts',
   use: {
     ...devices['Desktop Chrome'],
     locale: 'en-US',

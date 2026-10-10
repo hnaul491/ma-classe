@@ -1,8 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 const TEACHER = { email: process.env.E2E_TEACHER_EMAIL!, password: process.env.E2E_TEACHER_PASSWORD! };
 const STUDENT = { email: process.env.E2E_STUDENT_EMAIL!, password: process.env.E2E_STUDENT_PASSWORD! };
+
+const contexts: BrowserContext[] = [];
+
+test.afterEach(async () => {
+  await Promise.all(contexts.splice(0).map((c) => c.close()));
+});
 
 test.beforeEach(async () => {
   // A failed earlier run can leave a live lesson; end it so "Start lesson" shows.
@@ -18,6 +24,7 @@ test.beforeEach(async () => {
 
 async function signedInPage(browser: Browser, who: typeof TEACHER): Promise<Page> {
   const context = await browser.newContext({ permissions: ['camera', 'microphone'] });
+  contexts.push(context);
   const page = await context.newPage();
   await page.goto('/login');
   await page.getByLabel('Email').fill(who.email);
@@ -68,7 +75,12 @@ test('a student cannot join a lesson that has ended', async ({ browser }) => {
   const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { persistSession: false },
   });
-  await admin.from('lessons').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('status', 'live');
+  const lessonId = new URL(lessonUrl).pathname.split('/').pop()!;
+  const { error } = await admin
+    .from('lessons')
+    .update({ status: 'ended', ended_at: new Date().toISOString() })
+    .eq('id', lessonId);
+  if (error) throw error;
 
   const student = await signedInPage(browser, STUDENT);
   await student.goto(lessonUrl);
