@@ -1,69 +1,74 @@
-import Image from "next/image";
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { getMember } from '@/lib/auth/session';
+import type { Lesson } from '@/lib/lessons/types';
+import { createClient } from '@/lib/supabase/server';
+import { startLesson } from './actions';
+import { LivePoller } from './LivePoller';
 
-export default function Home() {
+function minutesBetween(a: string, b: string | null): number | null {
+  if (!b) return null;
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
+}
+
+export default async function Home({ searchParams }: { searchParams: Promise<{ ended?: string }> }) {
+  const sp = await searchParams;
+  const { member } = await getMember();
+  if (!member) redirect('/login?denied=1');
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('lessons')
+    .select('id, title, status, started_at, ended_at')
+    .order('started_at', { ascending: false })
+    .limit(50);
+  const lessons = (data ?? []) as Lesson[];
+  const live = lessons.find((l) => l.status === 'live') ?? null;
+  const past = lessons.filter((l) => l.status === 'ended');
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold">Ma Classe</h1>
+        <span className="rounded bg-surface-2 px-2 py-1 text-xs uppercase tracking-wide text-muted">{member.role}</span>
+      </header>
+
+      {sp.ended && <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">The lesson has ended.</p>}
+
+      <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5">
+        {live ? (
+          <>
+            <p className="font-semibold">Lesson in progress: {live.title}</p>
+            <Link href={`/lesson/${live.id}`} className="self-start rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
+              Join lesson
+            </Link>
+          </>
+        ) : member.role === 'teacher' ? (
+          <form action={startLesson}>
+            <button type="submit" className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
+              Start lesson
+            </button>
+          </form>
+        ) : (
+          <>
+            <p className="text-muted">Waiting for your teacher to start the lesson. This page updates by itself.</p>
+            <LivePoller />
+          </>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-semibold">Past lessons</h2>
+        {past.length === 0 && <p className="text-muted">No lessons yet.</p>}
+        <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
+          {past.map((l) => (
+            <li key={l.id} className="flex justify-between gap-4 px-4 py-3">
+              <span>{l.title}</span>
+              <span className="text-sm tabular-nums text-muted">{minutesBetween(l.started_at, l.ended_at) ?? '–'} min</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </main>
   );
 }
