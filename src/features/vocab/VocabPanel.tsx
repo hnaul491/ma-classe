@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
 import type { VocabErrorKey } from './api';
@@ -29,6 +29,20 @@ function WordItem({
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<VocabErrorKey | null>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const refocusEdit = useRef(false);
+
+  // The edit form replaces the Edit button: once it closes, focus goes back to the button.
+  useEffect(() => {
+    if (editing || !refocusEdit.current) return;
+    refocusEdit.current = false;
+    editButton.current?.focus();
+  }, [editing]);
+
+  function closeEditor() {
+    refocusEdit.current = true;
+    setEditing(false);
+  }
 
   useEffect(() => {
     if (!confirming) return;
@@ -58,10 +72,10 @@ function WordItem({
           submitLabel={t('vocab.save')}
           onSubmit={async (d) => {
             const err = await update(word.id, d);
-            if (!err) setEditing(false);
+            if (!err) closeEditor();
             return err;
           }}
-          onCancel={() => setEditing(false)}
+          onCancel={closeEditor}
         />
       </div>
     );
@@ -90,6 +104,7 @@ function WordItem({
         )}
         <div className="mt-1.5 flex flex-wrap gap-2">
           <button
+            ref={editButton}
             type="button"
             onClick={() => {
               setError(null);

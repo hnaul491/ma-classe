@@ -189,6 +189,13 @@ export const en = {
   'vocab.notReady': 'Vocabulary isn’t set up yet. Run migration 0007 in Supabase.',
   'vocab.notAllowed': 'Only the teacher can add or delete words.',
   'vocab.saveFailed': 'Not saved. Check the connection and try again.',
+  'vocab.search': 'Search words and meanings',
+  'vocab.hideMeanings': 'Hide meanings',
+  'vocab.show': 'Show meaning',
+  'vocab.count': '{n} words',
+  'vocab.noLesson': 'Added outside a lesson',
+  'vocab.bookEmpty': 'No words yet. Words added during lessons appear here.',
+  'vocab.noMatch': 'No word matches this search.',
   'side.unread': 'New',
 } as const;
 
@@ -383,6 +390,13 @@ export const fr: Record<MessageKey, string> = {
   'vocab.notReady': 'Le vocabulaire n’est pas encore prêt. Lancez la migration 0007 dans Supabase.',
   'vocab.notAllowed': 'L’ajout et la suppression de mots sont réservés à votre prof.',
   'vocab.saveFailed': 'Non enregistré. Vérifiez la connexion et réessayez.',
+  'vocab.search': 'Rechercher un mot ou un sens',
+  'vocab.hideMeanings': 'Masquer les sens',
+  'vocab.show': 'Voir le sens',
+  'vocab.count': '{n} mots',
+  'vocab.noLesson': 'Ajouté hors cours',
+  'vocab.bookEmpty': 'Aucun mot pour l’instant. Les mots ajoutés pendant les cours apparaissent ici.',
+  'vocab.noMatch': 'Aucun mot ne correspond à cette recherche.',
   'side.unread': 'Nouveau',
 };
 

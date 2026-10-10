@@ -58,8 +58,10 @@ export function updateWord(id: string, draft: VocabDraft): Promise<VocabResult<V
       .update(toRow(draft))
       .eq('id', id)
       .select(VOCAB_COLUMNS)
-      .single();
-    return error || !data ? { ok: false, error: vocabErrorKey(error) } : { ok: true, value: fromRow(data as VocabRow) };
+      .maybeSingle();
+    if (error) return { ok: false, error: vocabErrorKey(error) };
+    // RLS hides a refused update as "0 rows", not as an error.
+    return data ? { ok: true, value: fromRow(data as VocabRow) } : { ok: false, error: 'vocab.notAllowed' };
   });
 }
 

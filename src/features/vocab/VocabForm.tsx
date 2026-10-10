@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
 import { useT } from '@/lib/i18n/client';
 import { isMessageKey } from '@/lib/i18n/messages';
@@ -26,6 +26,16 @@ export function VocabForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const french = useRef<HTMLInputElement>(null);
+  /** Where focus goes once the fieldset is enabled again: disabling it drops the focus. */
+  const refocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (busy) return;
+    const el = refocus.current;
+    refocus.current = null;
+    // Only when the focus was lost to the disabled fieldset, never away from where the user went since.
+    if (el?.isConnected && (!document.activeElement || document.activeElement === document.body)) el.focus();
+  }, [busy]);
 
   const set = (k: keyof VocabDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setDraft((d) => ({ ...d, [k]: e.target.value }));
@@ -35,65 +45,76 @@ export function VocabForm({
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
+    const focused = document.activeElement;
+    refocus.current = focused instanceof HTMLElement ? focused : null;
     setBusy(true);
     setError(null);
-    const key = await onSubmit(draft);
-    setBusy(false);
+    let key: string | null;
+    try {
+      key = await onSubmit(draft);
+    } catch {
+      key = 'vocab.saveFailed';
+    } finally {
+      setBusy(false);
+    }
     if (key) {
       setError(key);
     } else if (initial === undefined) {
       setDraft(EMPTY);
-      french.current?.focus();
+      refocus.current = french.current;
     }
   }
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2">
+      {/* Disabled while saving, so nothing typed meanwhile is wiped by the reset after the save. */}
+      <fieldset disabled={busy} className="flex min-w-0 flex-col gap-3">
+        <div className="flex flex-col gap-2">
+          <label className="field-label">
+            {t('vocab.french')}
+            <input
+              ref={french}
+              value={draft.french}
+              onChange={set('french')}
+              maxLength={VOCAB_LIMITS.french}
+              required
+              autoFocus={initial === undefined}
+              lang="fr"
+              className="field"
+            />
+          </label>
+          <AccentBar />
+        </div>
         <label className="field-label">
-          {t('vocab.french')}
-          <input
-            ref={french}
-            value={draft.french}
-            onChange={set('french')}
-            maxLength={VOCAB_LIMITS.french}
-            required
-            autoFocus={initial === undefined}
+          {t('vocab.meaningVi')}
+          <input value={draft.meaningVi} onChange={set('meaningVi')} maxLength={VOCAB_LIMITS.meaning} lang="vi" className="field" />
+        </label>
+        <label className="field-label">
+          {t('vocab.meaningEn')}
+          <input value={draft.meaningEn} onChange={set('meaningEn')} maxLength={VOCAB_LIMITS.meaning} lang="en" className="field" />
+        </label>
+        <label className="field-label">
+          {t('vocab.example')}
+          <textarea
+            value={draft.example}
+            onChange={set('example')}
+            rows={2}
+            maxLength={VOCAB_LIMITS.example}
             lang="fr"
-            className="field"
+            className="field resize-y py-2 leading-snug"
           />
         </label>
-        <AccentBar />
-      </div>
-      <label className="field-label">
-        {t('vocab.meaningVi')}
-        <input value={draft.meaningVi} onChange={set('meaningVi')} maxLength={VOCAB_LIMITS.meaning} lang="vi" className="field" />
-      </label>
-      <label className="field-label">
-        {t('vocab.meaningEn')}
-        <input value={draft.meaningEn} onChange={set('meaningEn')} maxLength={VOCAB_LIMITS.meaning} lang="en" className="field" />
-      </label>
-      <label className="field-label">
-        {t('vocab.example')}
-        <textarea
-          value={draft.example}
-          onChange={set('example')}
-          rows={2}
-          maxLength={VOCAB_LIMITS.example}
-          lang="fr"
-          className="field resize-y py-2 leading-snug"
-        />
-      </label>
-      <div className="flex flex-wrap gap-2">
-        <button type="submit" disabled={busy} className="btn btn-primary btn-sm">
-          {submitLabel}
-        </button>
-        {onCancel && (
-          <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">
-            {t('common.cancel')}
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" className="btn btn-primary btn-sm">
+            {submitLabel}
           </button>
-        )}
-      </div>
+          {onCancel && (
+            <button type="button" onClick={onCancel} className="btn btn-secondary btn-sm">
+              {t('common.cancel')}
+            </button>
+          )}
+        </div>
+      </fieldset>
       {error && (
         <p role="alert" className="text-sm text-pen">
           {isMessageKey(error) ? t(error) : error}

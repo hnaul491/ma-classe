@@ -51,6 +51,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           <Link href="/documents" className="btn btn-secondary btn-sm">
             {t('documents.title')}
           </Link>
+          <Link href="/vocab" className="btn btn-secondary btn-sm">
+            {t('vocab.title')}
+          </Link>
           <ThemeSwitch initial={theme} />
           <LanguageSwitch />
         </div>
