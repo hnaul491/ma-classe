@@ -58,7 +58,10 @@ export function prepareWord(d: VocabDraft): { ok: true; draft: VocabDraft } | { 
 export type VocabWire = { v: 1; lessonId: string; op: 'upsert'; word: VocabWord } | { v: 1; lessonId: string; op: 'delete'; id: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isDate = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+/** Clock slack for a peer's timestamps: a far-future `updatedAt` would win every merge forever. */
+const FUTURE_SLACK_MS = 5 * 60 * 1000;
+const isDate = (v: unknown): v is string =>
+  typeof v === 'string' && !Number.isNaN(Date.parse(v)) && Date.parse(v) <= Date.now() + FUTURE_SLACK_MS;
 const isText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
 
 /** Wire form: explicit fields only. */
@@ -156,7 +159,8 @@ export function foldText(s: string): string {
     .replace(/œ/g, 'oe')
     .replace(/æ/g, 'ae')
     .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '');
+    // Combining marks only (NFD splits accents off); \p{Diacritic} would also drop ASCII ^ and `.
+    .replace(/\p{M}/gu, '');
 }
 
 export function searchWords(words: readonly VocabWord[], query: string): VocabWord[] {

@@ -74,6 +74,7 @@ describe('wire format', () => {
     expect(decodeVocab(encodeVocab({ v: 1, lessonId: L, op: 'upsert', word: word({ french: 'a'.repeat(201) }) }), L)).toBeNull();
     expect(decodeVocab(encodeVocab({ v: 1, lessonId: L, op: 'upsert', word: word({ updatedAt: 'yesterday' }) }), L)).toBeNull();
     expect(decodeVocab(encodeVocab({ v: 1, lessonId: L, op: 'upsert', word: word({ lessonId: null }) }), L)).toBeNull();
+    expect(decodeVocab(encodeVocab({ v: 1, lessonId: L, op: 'upsert', word: word({ updatedAt: '2999-01-01T00:00:00.000Z' }) }), L)).toBeNull();
     expect(decodeVocab('not json', L)).toBeNull();
     expect(decodeVocab(JSON.stringify({ v: 2, lessonId: L, op: 'delete', id: word().id }), L)).toBeNull();
     expect(decodeVocab(JSON.stringify({ v: 1, lessonId: L, op: 'drop', id: word().id }), L)).toBeNull();
@@ -118,6 +119,7 @@ describe('search', () => {
     expect(foldText('cœur')).toBe('coeur');
     expect(foldText('ăn')).toBe('an');
     expect(foldText('Đẹp')).toBe('dep');
+    expect(foldText('a^b`c')).toBe('a^b`c');
   });
   it('matches the French word, both meanings and the example', () => {
     const words = [
