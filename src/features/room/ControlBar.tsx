@@ -4,7 +4,6 @@ import { useTrackToggle } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
-import type { Role } from '@/lib/lessons/types';
 import { CamIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
 
 const btn = 'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-blue';
@@ -37,14 +36,12 @@ function IconButton({
 }
 
 export function ControlBar({
-  role,
   screenSharing,
   onToggleShare,
   onEnd,
   planBUrl,
   compact = false,
 }: {
-  role: Role;
   screenSharing: boolean;
   onToggleShare: () => void;
   onEnd: () => void;
@@ -62,9 +59,9 @@ export function ControlBar({
     return () => clearTimeout(id);
   }, [confirmEnd]);
 
-  const endLabel = role === 'teacher' ? (confirmEnd ? t('bar.confirmEnd') : t('bar.end')) : t('bar.leave');
+  const endLabel = confirmEnd ? t('bar.confirmEnd') : t('bar.end');
   const onEndClick = () => {
-    if (role === 'teacher' && !confirmEnd) return setConfirmEnd(true);
+    if (!confirmEnd) return setConfirmEnd(true);
     onEnd();
   };
 

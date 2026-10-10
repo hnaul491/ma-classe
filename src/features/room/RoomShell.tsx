@@ -134,16 +134,14 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
   }, [localParticipant, changeStage, showToast, t]);
 
   const onEnd = useCallback(async () => {
-    if (member.role === 'teacher') {
-      try {
-        await endLesson(lessonId);
-      } catch {
-        showToast(t('room.endFailed'));
-        return;
-      }
+    try {
+      await endLesson(lessonId);
+    } catch {
+      showToast(t('room.endFailed'));
+      return;
     }
     await room.disconnect();
-  }, [member.role, lessonId, room, showToast, t]);
+  }, [lessonId, room, showToast, t]);
 
   // A camera or mic that stops working mid-lesson.
   useEffect(() => {
@@ -157,7 +155,6 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
   const visible = resolveVisibleStage(stage.stage, { screenActive: screenTracks.length > 0, available: AVAILABLE });
   const renderBar = (compact: boolean) => (
     <ControlBar
-      role={member.role}
       screenSharing={isScreenShareEnabled}
       onToggleShare={() => void toggleShare()}
       onEnd={() => void onEnd()}

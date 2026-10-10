@@ -14,7 +14,7 @@ function lessonTitle(now: Date): string {
 
 export async function startLesson(): Promise<void> {
   const { member } = await getMember();
-  if (!canStartLesson(member)) throw new Error('Only the teacher can start a lesson.');
+  if (!canStartLesson(member)) throw new Error('Only members can start a lesson.');
   const supabase = await createClient();
 
   const { data: live } = await supabase.from('lessons').select('id').eq('status', 'live').maybeSingle();
@@ -42,7 +42,7 @@ export async function startLesson(): Promise<void> {
 
 export async function endLesson(lessonId: string): Promise<void> {
   const { member } = await getMember();
-  if (!canEndLesson(member)) throw new Error('Only the teacher can end a lesson.');
+  if (!canEndLesson(member)) throw new Error('Only members can end a lesson.');
   const supabase = await createClient();
   const { error } = await supabase
     .from('lessons')

@@ -57,15 +57,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
               {t('home.joinLesson')}
             </Link>
           </>
-        ) : member.role === 'teacher' ? (
-          <form action={startLesson}>
-            <button type="submit" className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
-              {t('home.startLesson')}
-            </button>
-          </form>
         ) : (
           <>
-            <p className="text-muted">{t('home.waiting')}</p>
+            <p className="text-muted">{t('home.noLive')}</p>
+            <form action={startLesson}>
+              <button type="submit" className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
+                {t('home.startLesson')}
+              </button>
+            </form>
             <LivePoller />
           </>
         )}

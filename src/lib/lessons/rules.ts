@@ -1,12 +1,14 @@
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { Lesson, Member } from './types';
 
+/** Either member may start a lesson. */
 export function canStartLesson(m: Member | null): boolean {
-  return m?.role === 'teacher';
+  return m !== null;
 }
 
+/** Either member may end a lesson. */
 export function canEndLesson(m: Member | null): boolean {
-  return m?.role === 'teacher';
+  return m !== null;
 }
 
 export type JoinCheck =

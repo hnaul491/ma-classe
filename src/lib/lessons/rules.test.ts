@@ -6,12 +6,16 @@ const teacher: Member = { email: 't@x.fr', role: 'teacher', display_name: 'Teach
 const student: Member = { email: 's@x.fr', role: 'student', display_name: 'Student' };
 
 describe('canStartLesson / canEndLesson', () => {
-  it('allows only the teacher', () => {
+  it('lets either member start and end a lesson', () => {
     expect(canStartLesson(teacher)).toBe(true);
-    expect(canStartLesson(student)).toBe(false);
-    expect(canStartLesson(null)).toBe(false);
+    expect(canStartLesson(student)).toBe(true);
     expect(canEndLesson(teacher)).toBe(true);
-    expect(canEndLesson(student)).toBe(false);
+    expect(canEndLesson(student)).toBe(true);
+  });
+
+  it('refuses anyone who is not a member', () => {
+    expect(canStartLesson(null)).toBe(false);
+    expect(canEndLesson(null)).toBe(false);
   });
 });
 

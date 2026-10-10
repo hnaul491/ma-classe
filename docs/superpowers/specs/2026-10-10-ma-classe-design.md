@@ -75,7 +75,7 @@ The free plan covers about 27 such lessons a month.
 | Route | Who | Content |
 |---|---|---|
 | `/login` | Anyone | Google sign-in button. Non-members are signed out and see "This classroom is private." |
-| `/` | Members | **Teacher:** Start lesson. **Student:** Join, enabled only while a lesson is live. Both see a list of past lessons, a link to Vocabulary, and the usage meter. |
+| `/` | Members | **Either member:** Start lesson when none is live, or Join while one is live (the page refreshes itself). Both see a list of past lessons, a link to Vocabulary, and the usage meter. |
 | `/lesson/[id]` | Members | Pre-join (layout A), then the room. |
 | `/lesson/[id]/review` | Members | Read-only board snapshot, chat, and vocab of an ended lesson. |
 | `/vocab` | Members | All words, search, "hide meaning" toggle, edit. |
@@ -102,7 +102,7 @@ The **stage** (main area) shows one thing at a time. Cameras are always visible.
 4. **Files go to the board.** Insert → Upload or From Drive switches the stage to the board and places the document there.
 5. **One screen share at a time.** A new share replaces the existing one.
 6. **Sharing the entire screen** hides the sharer's own preview (no mirror effect) and shows a tip to turn off notifications.
-7. **Control bar.** Icon-only, the same everywhere, in this order: Mic · Camera | Board · Share · Media | Chat ··· Plan B · End/Leave. Every icon has a tooltip; the active stage icon is highlighted. The teacher's red button is End lesson (saves and closes the lesson); the student's is Leave.
+7. **Control bar.** Icon-only, the same everywhere, in this order: Mic · Camera | Board · Share · Media | Chat ··· Plan B · End. Every icon has a tooltip; the active stage icon is highlighted. The red button is End lesson for both members (2-click confirm; saves and closes the lesson for both). Closing the tab steps out without ending.
 
 ### Languages
 
@@ -231,7 +231,7 @@ vocab        (id uuid pk, lesson_id uuid fk null, french text, meaning_vi text, 
   - requires membership and a `live` lesson matching `[id]`;
   - mints a LiveKit token with identity = member email, room = lesson id, grants `roomJoin`, `canPublish`, `canSubscribe`, `canPublishData`, and a TTL of 4 hours.
   - The LiveKit API secret exists only in Vercel environment variables.
-- Lesson lifecycle: only the teacher can create a lesson (Start) or end it (End).
+- Lesson lifecycle: either member can create a lesson (Start) or end it (End) (changed 2026-10-10 at the user's request; migration 0002).
 - No secrets in the client bundle except public keys (Supabase anon key, Google Picker API key restricted by HTTP referrer).
 
 ## 12. Reliability and error handling
