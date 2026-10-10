@@ -29,7 +29,7 @@ export async function proxy(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   // API routes check auth themselves and answer with JSON, never a redirect.
-  if (!user && !PUBLIC_PATHS.some((p) => path.startsWith(p))) {
+  if (!user && !PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + '/'))) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
