@@ -121,26 +121,26 @@ The interface is available in English and French (added 2026-10-10). Each person
 
 | Source | Handling |
 |---|---|
-| Upload PDF | PDF import (section 6) |
-| Upload image (PNG, JPG, WebP) | Uploaded to Storage, inserted on the board |
+| Upload PDF | Original saved to the Drive class folder; PDF import (section 6) renders page images to Supabase |
+| Upload image (PNG, JPG, WebP) | Original saved to the Drive class folder; a compressed copy (WebP) goes to Supabase and is inserted on the board |
 | Drive: Google Slides / Docs | Picker (`drive.file` scope) → Drive API `files.export` to `application/pdf` → PDF import |
 | Drive: PDF / image | Picker → download → same as upload |
 | Drive: `.pptx` / `.docx` | v1: message "Export this file as PDF first" |
-| Audio file (MP3, M4A, WAV; max 20 MB) | Uploaded to Storage; played by the synced player with a signed URL |
-| Video file (on the computer or in Drive) | **Not uploaded.** Opened in a browser tab and shown with Share screen → that tab, with tab audio (Chrome/Edge). |
+| Audio file (MP3, M4A, WAV) | Saved to the Drive class folder; each browser downloads it from Drive with its own Google token and plays it in the synced player |
+| Video file | Saved to (or already in) the Drive class folder. Played with the embedded Drive player: both people watch, each controls their own playback (no sync). For a synced view the teacher shares that tab with tab audio. |
 | YouTube link | Synced player using the YouTube IFrame Player API |
 
-**Drive access:** the Google token for Drive is requested on demand through a Google Identity Services token client when the user opens the Picker. It is short-lived and never stored.
+**Drive class folder:** on first use the app creates a folder "Ma Classe" in the teacher's Google Drive (15 GB free) and shares it with the student. All uploads go there, so the teacher can also browse and organize them in Drive. Scope: `https://www.googleapis.com/auth/drive` (restricted). This is allowed without Google verification because the OAuth app stays in **Testing** mode with only the 2 members as test users.
+
+**Drive access:** each browser requests a short-lived Google token on demand through a Google Identity Services token client (Picker, upload, audio download). Tokens are never stored server-side.
 
 **Media sync:** whoever acts sends `{action: play|pause|seek, mediaId, position, sentAt}`. Receivers apply the action. While playing, the starter sends its position every 5 seconds, and a receiver that drifts by more than 1 second seeks to match.
 
-**Storage policy** (Supabase Free gives 1 GB of file storage):
+**Storage policy:**
 
-- No video uploads. Video comes from YouTube links (synced player) or from tab sharing with tab audio.
-- For a PDF, only the compressed page images (WebP) shown on the board are stored, not a second copy of the original.
-- Audio uploads are capped at 20 MB.
-- The usage meter warns at 70% and offers "Delete old files" (files from lessons older than a chosen date).
-- Expected use is about 450 MB a year at 2 lessons a week. If the limit is ever reached, a free 10 GB file service (for example Backblaze B2) is the fallback; signing up must not need a card.
+- Google Drive class folder holds every original file (PDF, images, audio, video): 15 GB free in the teacher's account.
+- Supabase Storage (1 GB free) holds only the compressed board images (WebP page images and inserted images), about 100 MB a year at 2 lessons a week.
+- The usage meter shows Supabase storage and warns at 70%, with "Delete old board images" for lessons older than a chosen date (originals stay in Drive).
 
 **Sound when screen sharing:** tab audio works when sharing a Chrome/Edge tab. Entire-screen sharing carries system audio only on Windows Chrome/Edge. The teacher should wear headphones to avoid echo.
 
