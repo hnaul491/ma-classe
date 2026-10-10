@@ -36,6 +36,7 @@ export async function startLesson(): Promise<void> {
       lessonId = data.id;
     }
   }
+  if (!lessonId) throw new Error('Could not start the lesson. Try again.');
   redirect(`/lesson/${lessonId}`);
 }
 
