@@ -4,14 +4,21 @@ function required(name: string): string {
   return value;
 }
 
-export function serverEnv() {
+// One reader per secret, so a missing variable only breaks the feature that needs it.
+export function livekitEnv() {
   return {
-    livekitUrl: required('LIVEKIT_URL'),
-    livekitKey: required('LIVEKIT_API_KEY'),
-    livekitSecret: required('LIVEKIT_API_SECRET'),
-    serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY'),
-    cronSecret: required('CRON_SECRET'),
+    url: required('LIVEKIT_URL'),
+    key: required('LIVEKIT_API_KEY'),
+    secret: required('LIVEKIT_API_SECRET'),
   };
+}
+
+export function serviceRoleKey(): string {
+  return required('SUPABASE_SERVICE_ROLE_KEY');
+}
+
+export function cronSecret(): string {
+  return required('CRON_SECRET');
 }
 
 export const PLAN_B_URL = process.env.NEXT_PUBLIC_PLAN_B_URL ?? 'https://meet.google.com';

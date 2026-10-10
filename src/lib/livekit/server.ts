@@ -1,5 +1,5 @@
 import { RoomServiceClient } from 'livekit-server-sdk';
-import { serverEnv } from '@/lib/env';
+import { livekitEnv } from '@/lib/env';
 
 export function httpUrl(wsUrl: string): string {
   return wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
@@ -13,8 +13,8 @@ export function isNotFound(err: unknown): boolean {
 }
 
 export function roomService(): RoomServiceClient {
-  const env = serverEnv();
-  return new RoomServiceClient(httpUrl(env.livekitUrl), env.livekitKey, env.livekitSecret);
+  const env = livekitEnv();
+  return new RoomServiceClient(httpUrl(env.url), env.key, env.secret);
 }
 
 export async function listIdentities(room: string): Promise<string[]> {

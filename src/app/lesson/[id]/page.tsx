@@ -9,11 +9,14 @@ import { LessonClient } from './LessonClient';
 export default async function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const t = await getT();
+  // getMember throws when Supabase cannot answer; that reaches error.tsx, not the login page.
   const { member } = await getMember();
   if (!member) redirect('/login?denied=1');
 
   const supabase = await createClient();
-  const { data: lesson } = await supabase.from('lessons').select('id, title, status').eq('id', id).maybeSingle();
+  const { data: lesson, error } = await supabase.from('lessons').select('id, title, status').eq('id', id).maybeSingle();
+  // An outage goes to the error page, not to "not found".
+  if (error) throw new Error('Could not load the lesson', { cause: error });
   if (!lesson) notFound();
 
   if (lesson.status !== 'live') {

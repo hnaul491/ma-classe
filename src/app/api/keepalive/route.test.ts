@@ -15,10 +15,10 @@ const req = (auth?: string) =>
 
 describe('GET /api/keepalive', () => {
   beforeEach(() => {
-    vi.stubEnv('LIVEKIT_URL', 'wss://x');
-    vi.stubEnv('LIVEKIT_API_KEY', 'k');
-    vi.stubEnv('LIVEKIT_API_SECRET', 's');
-    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'r');
+    // Only the cron secret: keep-alive must not depend on LiveKit or other secrets.
+    vi.stubEnv('LIVEKIT_URL', '');
+    vi.stubEnv('LIVEKIT_API_KEY', '');
+    vi.stubEnv('LIVEKIT_API_SECRET', '');
     vi.stubEnv('CRON_SECRET', 'test');
     select.mockReset();
   });

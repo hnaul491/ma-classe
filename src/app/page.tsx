@@ -19,15 +19,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const locale = await getLocale();
   const t = await getT();
   const timeZone = await getTimeZone();
+  // getMember throws when Supabase cannot answer; that reaches error.tsx, not the login page.
   const { member } = await getMember();
   if (!member) redirect('/login?denied=1');
 
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('lessons')
     .select('id, title, status, started_at, ended_at')
     .order('started_at', { ascending: false })
     .limit(50);
+  // An outage goes to the error page, not to an empty "No lessons yet."
+  if (error) throw new Error('Could not load lessons', { cause: error });
   const lessons = (data ?? []) as Lesson[];
   const live = lessons.find((l) => l.status === 'live') ?? null;
   const past = lessons.filter((l) => l.status === 'ended');
