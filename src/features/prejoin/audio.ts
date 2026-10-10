@@ -18,6 +18,7 @@ export function useMicLevel(track?: MediaStreamTrack): number {
   useEffect(() => {
     if (!track) return;
     const ctx = new AudioContext();
+    void ctx.resume().catch(() => {});
     const source = ctx.createMediaStreamSource(new MediaStream([track]));
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;

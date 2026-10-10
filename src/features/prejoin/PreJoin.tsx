@@ -65,14 +65,17 @@ export function PreJoin({
 
   async function join() {
     setJoining(true);
-    await onJoin({
-      audioEnabled: Boolean(audioTrack),
-      videoEnabled: Boolean(videoTrack),
-      audioDeviceId,
-      videoDeviceId,
-      audioOutputId,
-    });
-    setJoining(false);
+    try {
+      await onJoin({
+        audioEnabled: Boolean(audioTrack),
+        videoEnabled: Boolean(videoTrack),
+        audioDeviceId,
+        videoDeviceId,
+        audioOutputId,
+      });
+    } finally {
+      setJoining(false);
+    }
   }
 
   return (
@@ -92,7 +95,10 @@ export function PreJoin({
             id="prejoin-camera"
             className="rounded border border-line bg-surface px-2 py-1.5"
             value={videoDeviceId ?? ''}
-            onChange={(e) => setVideoDeviceId(e.target.value || undefined)}
+            onChange={(e) => {
+              setDeviceError(null);
+              setVideoDeviceId(e.target.value || undefined);
+            }}
           >
             <option value="">Default camera</option>
             {cams.map((d) => (
@@ -109,7 +115,10 @@ export function PreJoin({
             id="prejoin-mic"
             className="rounded border border-line bg-surface px-2 py-1.5"
             value={audioDeviceId ?? ''}
-            onChange={(e) => setAudioDeviceId(e.target.value || undefined)}
+            onChange={(e) => {
+              setDeviceError(null);
+              setAudioDeviceId(e.target.value || undefined);
+            }}
           >
             <option value="">Default microphone</option>
             {mics.map((d) => (
