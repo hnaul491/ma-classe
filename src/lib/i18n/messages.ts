@@ -95,6 +95,7 @@ export const en = {
   'room.fullscreenHint': 'Fullscreen (F)',
   'room.exitFullscreen': 'Exit fullscreen',
   'room.exitFullscreenHint': 'Exit fullscreen (Esc)',
+  'board.accents': 'French accents',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -194,6 +195,7 @@ export const fr: Record<MessageKey, string> = {
   'room.fullscreenHint': 'Plein écran (F)',
   'room.exitFullscreen': 'Quitter le plein écran',
   'room.exitFullscreenHint': 'Quitter le plein écran (Échap)',
+  'board.accents': 'Accents français',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };
