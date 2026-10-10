@@ -2,7 +2,7 @@
 
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
-import { useCallback, useEffect, useEffectEvent, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { withTimeout } from '@/features/board/retry';
 import type { Member } from '@/lib/lessons/types';
 import { createBrowserSupabase } from '@/lib/supabase/client';
@@ -63,11 +63,14 @@ export function useChat(lessonId: string, member: Member, onIncoming?: (m: ChatM
   const room = useRoomContext();
   const [state, setState] = useState<ChatState>(() => ({ messages: [], read: new Set() }));
   const [history, setHistory] = useState<HistoryState>('loading');
+  /** Ids already seen (history, live, or sent by us): a message is announced only the first time. */
+  const seen = useRef(new Set<string>());
 
   /** `initial`: what was said before we joined is not "unread"; what a reconnect catches up on is. */
   const applyHistory = useEffectEvent((loaded: ChatMessage[] | null, initial: boolean) => {
     setHistory((h) => nextHistoryState(h, loaded !== null));
     if (!loaded) return;
+    for (const m of loaded) seen.current.add(m.id);
     setState((s) => {
       const known = new Set(s.messages.map((m) => m.id));
       const read = initial ? new Set([...s.read, ...loaded.filter((m) => !known.has(m.id)).map((m) => m.id)]) : s.read;
@@ -77,6 +80,8 @@ export function useChat(lessonId: string, member: Member, onIncoming?: (m: ChatM
 
   const receive = useEffectEvent((m: ChatMessage) => {
     setState((s) => ({ ...s, messages: mergeMessages(s.messages, [m]) }));
+    if (seen.current.has(m.id)) return;
+    seen.current.add(m.id);
     onIncoming?.(m);
   });
 
@@ -147,6 +152,7 @@ export function useChat(lessonId: string, member: Member, onIncoming?: (m: ChatM
         createdAt: new Date().toISOString(),
         status: 'sending',
       };
+      seen.current.add(m.id);
       setState((s) => ({ ...s, messages: mergeMessages(s.messages, [m]) }));
       room.localParticipant.sendText(encodeChat(m), { topic: CHAT_TOPIC }).catch(() => {});
       const insert = async (): Promise<{ createdAt: string } | null> => {

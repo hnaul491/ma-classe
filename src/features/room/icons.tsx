@@ -83,3 +83,21 @@ export const ChatIcon = () => (
     <path d="M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H7l-3 2.5V11H3.5a1 1 0 0 1-1-1z" />
   </svg>
 );
+
+export const BellIcon = () => (
+  <svg {...stroke}>
+    <path d="M3.5 11.5h9l-1.2-1.8V6.5a3.3 3.3 0 0 0-6.6 0v3.2zM6.5 13.5a1.5 1.5 0 0 0 3 0" />
+  </svg>
+);
+
+export const BellOffIcon = () => (
+  <svg {...stroke}>
+    <path d="M3.5 11.5h9l-1.2-1.8V6.5a3.3 3.3 0 0 0-6.6 0v3.2zM6.5 13.5a1.5 1.5 0 0 0 3 0M2 2l12 12" />
+  </svg>
+);
+
+export const CloseIcon = () => (
+  <svg {...stroke}>
+    <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
+  </svg>
+);
