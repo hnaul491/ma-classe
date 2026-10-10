@@ -200,6 +200,12 @@ export const en = {
   'vocab.noMatch': 'No word matches this search.',
   'side.title': 'Chat and vocabulary',
   'side.unread': 'New',
+  'review.board': 'Board',
+  'review.boardLoading': 'Loading the board…',
+  'review.boardEmpty': 'Nothing was written on the board in this lesson.',
+  'review.boardFailed': 'The board couldn’t load. Reload the page to try again.',
+  'review.noChat': 'No messages in this lesson.',
+  'review.noVocab': 'No words were added in this lesson.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -404,6 +410,12 @@ export const fr: Record<MessageKey, string> = {
   'vocab.noMatch': 'Aucun mot ne correspond à cette recherche.',
   'side.title': 'Discussion et vocabulaire',
   'side.unread': 'Nouveau',
+  'review.board': 'Tableau',
+  'review.boardLoading': 'Chargement du tableau…',
+  'review.boardEmpty': 'Rien n’a été écrit au tableau pendant ce cours.',
+  'review.boardFailed': 'Le tableau n’a pas pu se charger. Rechargez la page pour réessayer.',
+  'review.noChat': 'Aucun message pendant ce cours.',
+  'review.noVocab': 'Aucun mot n’a été ajouté pendant ce cours.',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };

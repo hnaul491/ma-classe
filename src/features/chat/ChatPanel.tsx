@@ -4,10 +4,10 @@ import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState }
 import { AccentBar } from '@/features/board/AccentBar';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
+import { ChatBody } from './ChatBody';
 import {
   charCount,
   formatChatTime,
-  linkify,
   MAX_CHAT,
   prepareMessage,
   shouldSendOnKey,
@@ -18,23 +18,6 @@ import {
 /** Within this many pixels of the bottom counts as "at the bottom": new messages keep the list scrolled down. */
 const STICK_PX = 48;
 const MAX_ROWS = 4;
-
-function Body({ text }: { text: string }) {
-  // Text nodes and plain links only: the body is never parsed as HTML.
-  return (
-    <p className="whitespace-pre-wrap break-words text-sm">
-      {linkify(text).map((s, i) =>
-        s.kind === 'link' ? (
-          <a key={i} href={s.href} target="_blank" rel="noopener noreferrer" className="link break-all">
-            {s.text}
-          </a>
-        ) : (
-          s.text
-        ),
-      )}
-    </p>
-  );
-}
 
 /** The list and the message box only: the side panel around it supplies the frame and the header. */
 export function ChatPanel({
@@ -154,7 +137,7 @@ export function ChatPanel({
               <time dateTime={m.createdAt}>{formatChatTime(m.createdAt, time)}</time>
             </div>
             <div className={`mt-0.5 inline-block max-w-full rounded-lg px-2.5 py-1.5 text-left ${mine(m) ? 'bg-surface-2' : 'border border-line'}`}>
-              <Body text={m.body} />
+              <ChatBody text={m.body} />
             </div>
             {m.status === 'unsaved' && <p className="mt-0.5 text-xs text-pen">{t('chat.unsaved')}</p>}
           </article>

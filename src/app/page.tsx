@@ -99,13 +99,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         {past.length === 0 ? (
           <p className="text-muted">{t('home.noLessons')}</p>
         ) : (
-          <ul className="card flex flex-col divide-y divide-line">
+          <ul className="card flex flex-col divide-y divide-line overflow-hidden">
             {past.map((l) => (
-              <li key={l.id} className="flex items-baseline justify-between gap-4 px-5 py-3.5">
-                <span className="font-medium">{t('lesson.title', { date: formatLessonDate(l.started_at, locale, timeZone) })}</span>
-                <span className="text-sm tabular-nums text-muted">
-                  {t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}
-                </span>
+              <li key={l.id} className="flex">
+                <Link
+                  href={`/lesson/${l.id}/review`}
+                  className="flex flex-1 items-baseline justify-between gap-4 px-5 py-3.5 hover:bg-surface-2 focus-visible:-outline-offset-2"
+                >
+                  <span className="font-medium">{t('lesson.title', { date: formatLessonDate(l.started_at, locale, timeZone) })}</span>
+                  <span className="text-sm tabular-nums text-muted">
+                    {t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

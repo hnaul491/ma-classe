@@ -27,6 +27,7 @@ import { downloadDriveFile, openDrivePicker } from '@/features/drive/drive';
 import { createDriveImport } from '@/features/drive/importFlow';
 import { getDriveToken, preloadDriveAuth } from '@/features/drive/token';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
+import { useThemeName } from '@/features/board/useThemeName';
 import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
 import { CloseIcon } from '@/features/room/icons';
 import { isTypingElement } from '@/features/room/keys';
@@ -63,29 +64,6 @@ export type BoardHandle = {
   /** Sends the last strokes and saves the scene now. True when everything is saved. */
   flush: () => Promise<boolean>;
 };
-
-function readTheme(): 'light' | 'dark' {
-  if (typeof document === 'undefined') return 'light';
-  const attr = document.documentElement.dataset.theme;
-  return attr === 'dark' || (!attr && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-}
-
-function useThemeName(): 'light' | 'dark' {
-  // Read synchronously on first render (Board is client-only) so dark mode does not flash.
-  const [theme, setTheme] = useState(readTheme);
-  useEffect(() => {
-    const read = () => setTheme(readTheme());
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const mo = new MutationObserver(read);
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    mq.addEventListener('change', read);
-    return () => {
-      mo.disconnect();
-      mq.removeEventListener('change', read);
-    };
-  }, []);
-  return theme;
-}
 
 function writeBackup(key: string, scene: { elements: readonly unknown[] }) {
   try {
