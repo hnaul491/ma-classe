@@ -15,13 +15,16 @@ export function AccentBar() {
       if (isTextTarget(e.target as HTMLElement)) target.current = e.target as HTMLElement;
     };
     const onKey = (e: KeyboardEvent) => setUpper(e.shiftKey);
+    const onBlur = () => setUpper(false);
     document.addEventListener('focusin', onFocus);
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
+    window.addEventListener('blur', onBlur);
     return () => {
       document.removeEventListener('focusin', onFocus);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -33,7 +36,11 @@ export function AccentBar() {
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       // React and Excalidraw track the native value setter, so set it through the prototype.
       Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, next.value);
-      el.setSelectionRange(next.caret, next.caret);
+      try {
+        el.setSelectionRange(next.caret, next.caret);
+      } catch {
+        // Some input types do not support selection; the value is already set.
+      }
       el.dispatchEvent(new Event('input', { bubbles: true }));
     } else if (el.isContentEditable) {
       document.execCommand('insertText', false, ch);

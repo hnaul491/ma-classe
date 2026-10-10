@@ -32,9 +32,12 @@ create policy files_read on public.files for select to authenticated using (publ
 create policy files_insert on public.files for insert to authenticated with check (public.is_member());
 
 -- Private bucket for board images (PDF pages as WebP, inserted pictures).
-insert into storage.buckets (id, name, public)
-values ('lesson-files', 'lesson-files', false)
-on conflict (id) do nothing;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('lesson-files', 'lesson-files', false, 10485760, array['image/webp', 'image/png', 'image/jpeg'])
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
 
 create policy lesson_files_read on storage.objects for select to authenticated
   using (bucket_id = 'lesson-files' and public.is_member());

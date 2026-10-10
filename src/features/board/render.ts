@@ -1,6 +1,6 @@
 'use client';
 
-import { MAX_PAGES, type RenderedPage } from './upload';
+import { pdfPagesError, type RenderedPage } from './upload';
 
 /** About 150 DPI: pdf.js units are 72 per inch. */
 const PDF_SCALE = 150 / 72;
@@ -24,9 +24,9 @@ export async function renderPdf(file: File, onPage?: (n: number, total: number) 
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
   const task = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
-  const doc = await task.promise;
   try {
-    if (doc.numPages > MAX_PAGES) throw new PageLimitError(doc.numPages);
+    const doc = await task.promise;
+    if (pdfPagesError(doc.numPages)) throw new PageLimitError(doc.numPages);
     const pages: RenderedPage[] = [];
     for (let n = 1; n <= doc.numPages; n += 1) {
       const page = await doc.getPage(n);
@@ -35,7 +35,10 @@ export async function renderPdf(file: File, onPage?: (n: number, total: number) 
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvas, viewport }).promise;
-      pages.push({ blob: await canvasToWebp(canvas), width: canvas.width, height: canvas.height });
+      const blob = await canvasToWebp(canvas);
+      pages.push({ blob, width: canvas.width, height: canvas.height });
+      canvas.width = 0;
+      canvas.height = 0;
       page.cleanup();
       onPage?.(n, doc.numPages);
     }
@@ -49,8 +52,8 @@ export async function imageToWebp(file: File): Promise<RenderedPage> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
   canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   bitmap.close();
   return { blob: await canvasToWebp(canvas), width: canvas.width, height: canvas.height };
