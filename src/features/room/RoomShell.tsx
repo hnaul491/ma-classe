@@ -3,12 +3,16 @@
 import dynamic from 'next/dynamic';
 import { RoomAudioRenderer, useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
 import { RoomEvent, Track, type LocalTrackPublication, type Participant, type RemoteTrackPublication } from 'livekit-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
 import { isFileDrag } from '@/features/board/files';
 import { withTimeout } from '@/features/board/retry';
 import { ChatPanel } from '@/features/chat/ChatPanel';
+import { ChatToast } from '@/features/chat/ChatToast';
+import { initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
+import { playDing, useChatMuted } from '@/features/chat/sound';
 import { useChat } from '@/features/chat/useChat';
+import { useTabTitle } from '@/features/chat/useTabTitle';
 import type { BoardHandle } from '@/features/stage/Board';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
@@ -73,16 +77,30 @@ export function RoomShell({
   const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>(fullscreenKeyEnabled(visible));
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
-  const chat = useChat(lessonId, member);
   // Personal: each person opens and closes their own chat; it is not synced.
   const [chatOpen, setChatOpen] = useState(false);
+  const [toast, dispatchToast] = useReducer(toastReducer, initialToast);
+  const [chatMuted, toggleChatMuted] = useChatMuted();
+  const chat = useChat(lessonId, member, (m) => {
+    if (!shouldNotify({ fromSelf: m.authorEmail.toLowerCase() === member.email.toLowerCase(), panelOpen: chatOpen })) return;
+    dispatchToast({ type: 'new', name: m.authorName, text: previewText(m.body) });
+    void playDing();
+  });
+  useTabTitle(chat.unread);
   const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
   // Opening shows everything, and closing counts what arrived while it was open as read.
   const toggleChat = useCallback(() => {
     setChatOpen((o) => !o);
+    dispatchToast({ type: 'open' });
     markRead();
   }, [markRead]);
+  const openChatFromToast = useCallback(() => {
+    setChatOpen(true);
+    dispatchToast({ type: 'open' });
+    markRead();
+  }, [markRead]);
+  const dismissToast = useCallback(() => dispatchToast({ type: 'dismiss' }), []);
   const closeChat = useCallback(() => {
     setChatOpen(false);
     markRead();
@@ -296,8 +314,12 @@ export function RoomShell({
             send={chat.send}
             member={member}
             history={chat.history}
+            muted={chatMuted}
+            onToggleMuted={toggleChatMuted}
           />
         </div>
+
+        <ChatToast state={toast} onOpen={openChatFromToast} onDismiss={dismissToast} />
 
         {fsActive && barVisible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
 

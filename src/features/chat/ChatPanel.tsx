@@ -43,6 +43,8 @@ export function ChatPanel({
   send,
   member,
   history = 'ready',
+  muted = false,
+  onToggleMuted,
 }: {
   open: boolean;
   onClose: () => void;
@@ -50,6 +52,8 @@ export function ChatPanel({
   send: (raw: string) => Promise<'chat.empty' | 'chat.tooLong' | null>;
   member: Member;
   history?: HistoryState;
+  muted?: boolean;
+  onToggleMuted?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -115,9 +119,23 @@ export function ChatPanel({
     <section aria-label={t('chat.title')} hidden={!open} className="card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80">
       <header className="flex items-center justify-between border-b border-line px-3 py-2">
         <h2 className="text-sm font-semibold">{t('chat.title')}</h2>
-        <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
-          {t('common.close')}
-        </button>
+        <div className="flex items-center gap-2">
+          {onToggleMuted && (
+            <button
+              type="button"
+              onClick={onToggleMuted}
+              aria-pressed={muted}
+              aria-label={t(muted ? 'chat.muted' : 'chat.sound')}
+              title={t(muted ? 'chat.muted' : 'chat.sound')}
+              className="btn btn-secondary btn-sm"
+            >
+              <span aria-hidden="true">{muted ? '🔇' : '🔔'}</span>
+            </button>
+          )}
+          <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
+            {t('common.close')}
+          </button>
+        </div>
       </header>
 
       <div

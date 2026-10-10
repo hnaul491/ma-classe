@@ -58,7 +58,8 @@ type ChatState = { messages: ChatMessage[]; read: ReadonlySet<string> };
 
 const sameEmail = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-export function useChat(lessonId: string, member: Member) {
+/** `onIncoming`: called once for each live message from someone else (not for history catch-up). */
+export function useChat(lessonId: string, member: Member, onIncoming?: (m: ChatMessage) => void) {
   const room = useRoomContext();
   const [state, setState] = useState<ChatState>(() => ({ messages: [], read: new Set() }));
   const [history, setHistory] = useState<HistoryState>('loading');
@@ -76,6 +77,7 @@ export function useChat(lessonId: string, member: Member) {
 
   const receive = useEffectEvent((m: ChatMessage) => {
     setState((s) => ({ ...s, messages: mergeMessages(s.messages, [m]) }));
+    onIncoming?.(m);
   });
 
   // History on mount, and again after a reconnect (messages sent while we were away).
