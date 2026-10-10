@@ -25,6 +25,15 @@ export function isLessonPath(lessonId: string, path: string): boolean {
   return path.startsWith(prefix) && path.length > prefix.length && !path.split('/').includes('..');
 }
 
+/**
+ * The path an upload gives this file (`<lesson folder>/<fileId>.webp`). A document re-used from an
+ * older lesson stays in that lesson's folder, so peer `file` messages may point there too.
+ */
+export function isFilePathFor(fileId: string, path: string): boolean {
+  const parts = path.split('/');
+  return parts.length === 2 && parts[0] !== '' && parts[0] !== '.' && parts[0] !== '..' && parts[1] === `${fileId}.webp`;
+}
+
 export type RenderedPage = { blob: Blob; width: number; height: number };
 
 export async function uploadBoardImage(
@@ -32,6 +41,7 @@ export async function uploadBoardImage(
   page: RenderedPage,
   kind: 'page' | 'image',
   name: string,
+  doc?: { documentId: string; pageIndex: number },
 ): Promise<{ fileId: string; path: string }> {
   const supabase = createBrowserSupabase();
   const fileId = crypto.randomUUID();
@@ -48,6 +58,8 @@ export async function uploadBoardImage(
     width: page.width,
     height: page.height,
     name,
+    document_id: doc?.documentId ?? null,
+    page_index: doc?.pageIndex ?? 0,
   });
   if (row.error) throw new Error('Could not record the image', { cause: row.error });
   return { fileId, path };

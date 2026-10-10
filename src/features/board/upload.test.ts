@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkUpload, isLessonPath, MAX_BYTES, pdfPagesError } from './upload';
+import { checkUpload, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError } from './upload';
 
 describe('checkUpload', () => {
   it('accepts PDFs and PNG/JPG/WebP images', () => {
@@ -33,5 +33,21 @@ describe('isLessonPath', () => {
     expect(isLessonPath('L1', 'L1abc.webp')).toBe(false);
     expect(isLessonPath('L1', 'L1/../L2/abc.webp')).toBe(false);
     expect(isLessonPath('L1', 'L1/')).toBe(false);
+  });
+});
+
+describe('isFilePathFor', () => {
+  it('accepts the path an upload gives this file, in any lesson folder', () => {
+    expect(isFilePathFor('F1', 'L1/F1.webp')).toBe(true);
+    expect(isFilePathFor('F1', 'L2/F1.webp')).toBe(true);
+  });
+
+  it('rejects other files, nested or relative paths', () => {
+    expect(isFilePathFor('F1', 'L1/F2.webp')).toBe(false);
+    expect(isFilePathFor('F1', 'F1.webp')).toBe(false);
+    expect(isFilePathFor('F1', '/F1.webp')).toBe(false);
+    expect(isFilePathFor('F1', '../F1.webp')).toBe(false);
+    expect(isFilePathFor('F1', 'L1/x/F1.webp')).toBe(false);
+    expect(isFilePathFor('F1', 'L1/F1.png')).toBe(false);
   });
 });

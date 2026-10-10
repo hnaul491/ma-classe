@@ -149,6 +149,9 @@ export function RoomShell({
   const toggleBoard = useCallback(() => {
     changeStage(stageRef.current.stage === 'board' ? 'cameras' : 'board');
   }, [changeStage]);
+  const showBoard = useCallback(() => {
+    if (stageRef.current.stage !== 'board') changeStage('board');
+  }, [changeStage]);
 
   const onEnd = useCallback(async () => {
     try {
@@ -192,7 +195,7 @@ export function RoomShell({
         {visible === 'cameras' && <CameraTiles variant="stage" />}
         <main className={visible === 'cameras' ? 'hidden' : 'min-w-0 flex-1'}>
           <div className={visible === 'board' ? 'h-full' : 'hidden'}>
-            <Board lessonId={lessonId} member={member} visible={visible === 'board'} onError={(k) => showToast(t(k))} />
+            <Board lessonId={lessonId} member={member} visible={visible === 'board'} onError={(k) => showToast(t(k))} onShow={showBoard} />
           </div>
           {visible === 'screen' && <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />}
         </main>

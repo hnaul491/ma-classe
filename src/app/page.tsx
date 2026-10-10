@@ -44,10 +44,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         <h1>
           <Wordmark />
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-muted">
             {t(member.role === 'teacher' ? 'role.teacher' : 'role.student')}
           </span>
+          <Link href="/documents" className="btn btn-secondary btn-sm">
+            {t('documents.title')}
+          </Link>
           <ThemeSwitch initial={theme} />
           <LanguageSwitch />
         </div>

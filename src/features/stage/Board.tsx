@@ -7,15 +7,19 @@ import type { ExcalidrawElement, FileId, OrderedExcalidrawElement } from '@excal
 import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent, type RemoteParticipant } from 'livekit-client';
-import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useId, useReducer, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
 import { parseBackup, shouldWriteBackup } from '@/features/board/backup';
-import { backupKey, loadBoard, saveBoard } from '@/features/board/persistence';
+import { sceneFileIds } from '@/features/board/files';
+import { backupKey, loadBoard, loadDocumentFiles, loadFiles, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
 import { createSaveQueue } from '@/features/board/saveQueue';
 import { createDebounce, createThrottle, type Debounce, type Throttle } from '@/features/board/timing';
-import { checkUpload, downloadAsDataURL, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
+import { checkUpload, downloadAsDataURL, isFilePathFor, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
+import { DocumentPicker } from '@/features/documents/DocumentPicker';
+import type { FileRow } from '@/features/documents/group';
+import { addParam } from '@/features/documents/params';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
 import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
 import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, viewportFor } from '@/features/board/view';
@@ -94,11 +98,14 @@ export default function Board({
   member,
   visible,
   onError,
+  onShow,
 }: {
   lessonId: string;
   member: Member;
   visible: boolean;
   onError: (key: MessageKey) => void;
+  /** Bring the board on stage (a document is being added from the Documents page). */
+  onShow?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -126,17 +133,52 @@ export default function Board({
   const [progress, setProgress] = useState<string | null>(null);
   const [frames, setFrames] = useState<ExcalidrawElement[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const [picking, setPicking] = useState(false);
 
   // Latest onError without re-running effects when the parent passes a new function.
   const reportError = useEffectEvent((key: MessageKey) => onError(key));
 
+  /** Image downloads in flight, so a `file` message and a missing-file lookup never fetch one twice. */
+  const downloads = useRef(new Map<string, Promise<void>>());
+  /** File ids already looked up by fetchMissingFiles (each is tried once per mount). */
+  const lookedUp = useRef(new Set<string>());
+
   const addFileFromStorage = useCallback(
-    async (fileId: string, path: string, mime: string) => {
-      if (!api || api.getFiles()[fileId]) return;
-      const dataURL = await downloadAsDataURL(path);
-      api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: mime as BinaryFileData['mimeType'], created: Date.now() }]);
+    (fileId: string, path: string, mime: string): Promise<void> => {
+      if (!api || api.getFiles()[fileId]) return Promise.resolve();
+      const running = downloads.current.get(fileId);
+      if (running) return running;
+      const download = (async () => {
+        const dataURL = await downloadAsDataURL(path);
+        api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: mime as BinaryFileData['mimeType'], created: Date.now() }]);
+      })().finally(() => {
+        if (downloads.current.get(fileId) === download) downloads.current.delete(fileId);
+      });
+      downloads.current.set(fileId, download);
+      return download;
     },
     [api],
+  );
+
+  /**
+   * Images whose file this board does not have yet: a backup or the other person's scene can use
+   * files the saved scene does not (e.g. a document re-used from an older lesson, not saved yet).
+   */
+  const fetchMissingFiles = useCallback(
+    (elements: readonly object[]) => {
+      if (!api) return;
+      const have = api.getFiles();
+      const ids = sceneFileIds(elements).filter((id) => !have[id] && !downloads.current.has(id) && !lookedUp.current.has(id));
+      if (ids.length === 0) return;
+      for (const id of ids) lookedUp.current.add(id);
+      void loadFiles(ids)
+        .then((files) => Promise.all(files.map((f) => addFileFromStorage(f.id, f.storage_path, f.mime))))
+        .catch(() => {
+          for (const id of ids) lookedUp.current.delete(id); // a later message retries
+        });
+    },
+    [api, addFileFromStorage],
   );
 
   const applyRemote = useCallback(
@@ -157,10 +199,11 @@ export default function Board({
       );
       markKnown(known.current, adoptedElements(merged, restored));
       api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+      fetchMissingFiles(restored);
       // saveBoard writes the whole scene, so remote changes must be saved too.
       if (loaded.current) queue.current?.push({ elements: api.getSceneElementsIncludingDeleted() });
     },
-    [api],
+    [api, fetchMissingFiles],
   );
 
   // The message handler replies through `send`, which the hook returns below; read it from a ref.
@@ -183,7 +226,7 @@ export default function Board({
         break;
       }
       case 'file':
-        if (isLessonPath(lessonId, msg.path)) void addFileFromStorage(msg.fileId, msg.path, msg.mime).catch(() => {});
+        if (isLessonPath(lessonId, msg.path) || isFilePathFor(msg.fileId, msg.path)) void addFileFromStorage(msg.fileId, msg.path, msg.mime).catch(() => {});
         break;
       case 'viewport': {
         if (!isStudent || !follow.following) break;
@@ -335,6 +378,27 @@ export default function Board({
     [api, lessonId, addFileFromStorage, applyRemote, send],
   );
 
+  // `?add=<documentId>` (from the Documents page): place that document once, after the board has loaded.
+  const addHandled = useRef(false);
+  const addFromUrl = useEffectEvent(() => {
+    if (addHandled.current) return;
+    const id = addParam(location.search);
+    if (!id) return;
+    addHandled.current = true;
+    // Drop the param at once, so a reload during the placement cannot add the document twice.
+    history.replaceState(null, '', location.pathname);
+    onShow?.();
+    void (async () => {
+      try {
+        await placeExisting(await loadDocumentFiles(id));
+      } catch {
+        onError('board.uploadFailed');
+      } finally {
+        setProgress(null);
+      }
+    })();
+  });
+
   // First load; then ask the other person for anything newer.
   useEffect(() => {
     if (!api) return;
@@ -342,10 +406,14 @@ export default function Board({
     loaded.current = false;
     backupMerged.current = false;
     loadFailed.current = false;
+    // A new Excalidraw instance has no files yet.
+    downloads.current.clear();
+    lookedUp.current.clear();
     if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
     void loadScene(() => cancelled).then((result) => {
       if (cancelled) return;
       if (result === 'failed') reportError('board.loadFailed');
+      if (result === 'loaded') addFromUrl();
       void send({ t: 'scene-req' }).catch(() => {});
     });
     return () => {
@@ -358,8 +426,10 @@ export default function Board({
     if (!api) return;
     void (async () => {
       // A failed first load disables saving; retry it now that the connection is back.
-      if (!loaded.current && loadFailed.current && (await loadScene(() => !mounted.current)) === 'failed') {
-        reportError('board.loadFailed');
+      if (!loaded.current && loadFailed.current) {
+        const result = await loadScene(() => !mounted.current);
+        if (result === 'failed') reportError('board.loadFailed');
+        if (result === 'loaded') addFromUrl();
       }
       if (!mounted.current) return;
       void send({ t: 'scene-req' }).catch(() => {});
@@ -434,35 +504,82 @@ export default function Board({
     [],
   );
 
+  /** Where new pages go: the view centre (images) and the page number to continue from (PDF frames). */
+  function placementStart(a: ExcalidrawImperativeAPI) {
+    const state: AppState = a.getAppState();
+    return {
+      center: viewCenter({ scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value, width: state.width, height: state.height }),
+      pageOffset: countPageFrames(a.getSceneElements(), t('board.page')),
+    };
+  }
+
+  /**
+   * Adds the elements for page `i` of a placement: a PDF page becomes a locked image in a frame,
+   * stacked below the scene; an image goes at the view centre.
+   */
+  function addPageElements(
+    a: ExcalidrawImperativeAPI,
+    fileId: string,
+    size: { width: number; height: number },
+    kind: 'page' | 'image',
+    i: number,
+    start: ReturnType<typeof placementStart>,
+  ) {
+    const imageId = crypto.randomUUID();
+    let skeleton;
+    if (kind === 'page') {
+      // Measured per page, so pages land below whatever is on the board now (including the other person's strokes).
+      const bottom = sceneBottom(a.getSceneElements());
+      const box = layoutPages([size], { x: 0, y: bottom === null ? 0 : bottom + (i === 0 ? FIRST_PAGE_GAP : NEXT_PAGE_GAP) })[0];
+      skeleton = [
+        { type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId, locked: true },
+        { type: 'frame' as const, children: [imageId], name: t('board.page', { n: start.pageOffset + i + 1 }), x: box.x - 20, y: box.y - 20, width: box.width + 40, height: box.height + 40 },
+      ];
+    } else {
+      const { center } = start;
+      const box = { x: center.cx - size.width / 4, y: center.cy - size.height / 4, width: size.width / 2, height: size.height / 2 };
+      skeleton = [{ type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId }];
+    }
+    const created = convertToExcalidrawElements(skeleton);
+    a.updateScene({ elements: [...a.getSceneElementsIncludingDeleted(), ...created], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  }
+
   async function placePages(pages: RenderedPage[], kind: 'page' | 'image', name: string) {
     if (!api) return;
-    const state: AppState = api.getAppState();
-    const center = viewCenter({ scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value, width: state.width, height: state.height });
-    const pageOffset = countPageFrames(api.getSceneElements(), t('board.page'));
+    const start = placementStart(api);
+    // One id for all pages of this upload, so the Documents page shows them as one document.
+    const documentId = crypto.randomUUID();
     for (let i = 0; i < pages.length; i += 1) {
       if (kind === 'page') setProgress(t('board.adding', { n: i + 1, total: pages.length }));
-      const { fileId, path } = await uploadBoardImage(lessonId, pages[i], kind, name);
+      const { fileId, path } = await uploadBoardImage(lessonId, pages[i], kind, name, { documentId, pageIndex: i });
       const dataURL = await blobToDataURL(pages[i].blob);
       api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: 'image/webp', created: Date.now() }]);
       void send({ t: 'file', fileId, path, mime: 'image/webp', width: pages[i].width, height: pages[i].height }).catch(() => {});
-      const imageId = crypto.randomUUID();
-      let skeleton;
-      if (kind === 'page') {
-        // Measured per page, so pages land below whatever is on the board now (including the other person's strokes).
-        const bottom = sceneBottom(api.getSceneElements());
-        const box = layoutPages([pages[i]], { x: 0, y: bottom === null ? 0 : bottom + (i === 0 ? FIRST_PAGE_GAP : NEXT_PAGE_GAP) })[0];
-        skeleton = [
-          { type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId, locked: true },
-          { type: 'frame' as const, children: [imageId], name: t('board.page', { n: pageOffset + i + 1 }), x: box.x - 20, y: box.y - 20, width: box.width + 40, height: box.height + 40 },
-        ];
-      } else {
-        const box = { x: center.cx - pages[0].width / 4, y: center.cy - pages[0].height / 4, width: pages[0].width / 2, height: pages[0].height / 2 };
-        skeleton = [{ type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId }];
-      }
-      const created = convertToExcalidrawElements(skeleton);
-      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...created], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      addPageElements(api, fileId, pages[i], kind, i, start);
     }
     setProgress(null);
+  }
+
+  /** Places an already uploaded document again (from the Documents library): same layout, no upload. */
+  async function placeExisting(rows: FileRow[]) {
+    if (!api) return;
+    if (rows.length === 0) throw new Error('The document has no pages');
+    const start = placementStart(api);
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      setProgress(row.kind === 'page' ? t('board.adding', { n: i + 1, total: rows.length }) : t('board.addingImage'));
+      await addFileFromStorage(row.id, row.storage_path, 'image/webp');
+      void send({ t: 'file', fileId: row.id, path: row.storage_path, mime: 'image/webp', width: row.width, height: row.height }).catch(() => {});
+      addPageElements(api, row.id, row, row.kind, i, start);
+    }
+    setProgress(null);
+  }
+
+  function pickDocument(rows: FileRow[]) {
+    setPicking(false);
+    void placeExisting(rows)
+      .catch(() => onError('board.uploadFailed'))
+      .finally(() => setProgress(null));
   }
 
   async function onFile(file: File) {
@@ -507,9 +624,12 @@ export default function Board({
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
           {progress && <span role="status" className="card px-3 py-1.5 text-sm">{progress}</span>}
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileInput.current?.click()} disabled={progress !== null}>
-            {t('board.insert')}
-          </button>
+          <AddMenu
+            buttonRef={addButton}
+            disabled={progress !== null}
+            onUpload={() => fileInput.current?.click()}
+            onDocuments={() => setPicking(true)}
+          />
           <input
             ref={fileInput}
             type="file"
@@ -553,6 +673,101 @@ export default function Board({
               ))}
             </nav>
           )}
+        </div>
+      )}
+
+      {picking && (
+        <DocumentPicker onPick={(d) => pickDocument(d.pages)} onClose={() => setPicking(false)} returnFocus={() => addButton.current} />
+      )}
+    </div>
+  );
+}
+
+/** The board's Add button: a small menu with Upload and From my documents. */
+function AddMenu({
+  buttonRef,
+  disabled,
+  onUpload,
+  onDocuments,
+}: {
+  buttonRef: RefObject<HTMLButtonElement | null>;
+  disabled: boolean;
+  onUpload: () => void;
+  onDocuments: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const shown = open && !disabled;
+
+  useEffect(() => {
+    if (!shown) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!menuRef.current?.contains(target) && !buttonRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [shown, buttonRef]);
+
+  function choose(action: () => void) {
+    setOpen(false);
+    buttonRef.current?.focus(); // the file chooser and the picker hand focus back here
+    action();
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      buttonRef.current?.focus();
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+      items[next]?.focus();
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  }
+
+  const item = 'rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-surface-2 focus-visible:bg-surface-2';
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="btn btn-secondary btn-sm"
+        aria-haspopup="menu"
+        aria-expanded={shown}
+        aria-controls={shown ? menuId : undefined}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {t('board.add')}
+        <svg aria-hidden viewBox="0 0 12 12" className={`size-3 transition-transform ${shown ? '' : 'rotate-180'}`}>
+          <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {shown && (
+        <div
+          ref={menuRef}
+          id={menuId}
+          role="menu"
+          aria-label={t('board.add')}
+          onKeyDown={onKeyDown}
+          className="card absolute bottom-full right-0 mb-2 flex w-max min-w-52 max-w-[calc(100vw-1.5rem)] flex-col p-1 shadow-lg"
+        >
+          <button type="button" role="menuitem" tabIndex={-1} className={item} onClick={() => choose(onUpload)}>
+            {t('board.addUpload')}
+          </button>
+          <button type="button" role="menuitem" tabIndex={-1} className={item} onClick={() => choose(onDocuments)}>
+            {t('board.addFromDocuments')}
+          </button>
         </div>
       )}
     </div>
