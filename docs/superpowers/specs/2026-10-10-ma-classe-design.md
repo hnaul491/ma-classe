@@ -126,12 +126,23 @@ The interface is available in English and French (added 2026-10-10). Each person
 | Drive: Google Slides / Docs | Picker (`drive.file` scope) → Drive API `files.export` to `application/pdf` → PDF import |
 | Drive: PDF / image | Picker → download → same as upload |
 | Drive: `.pptx` / `.docx` | v1: message "Export this file as PDF first" |
-| Audio / video file | Uploaded to Storage; played by the synced player with a signed URL |
+| Audio file (MP3, M4A, WAV; max 20 MB) | Uploaded to Storage; played by the synced player with a signed URL |
+| Video file (on the computer or in Drive) | **Not uploaded.** Opened in a browser tab and shown with Share screen → that tab, with tab audio (Chrome/Edge). |
 | YouTube link | Synced player using the YouTube IFrame Player API |
 
 **Drive access:** the Google token for Drive is requested on demand through a Google Identity Services token client when the user opens the Picker. It is short-lived and never stored.
 
 **Media sync:** whoever acts sends `{action: play|pause|seek, mediaId, position, sentAt}`. Receivers apply the action. While playing, the starter sends its position every 5 seconds, and a receiver that drifts by more than 1 second seeks to match.
+
+**Storage policy** (Supabase Free gives 1 GB of file storage):
+
+- No video uploads. Video comes from YouTube links (synced player) or from tab sharing with tab audio.
+- For a PDF, only the compressed page images (WebP) shown on the board are stored, not a second copy of the original.
+- Audio uploads are capped at 20 MB.
+- The usage meter warns at 70% and offers "Delete old files" (files from lessons older than a chosen date).
+- Expected use is about 450 MB a year at 2 lessons a week. If the limit is ever reached, a free 10 GB file service (for example Backblaze B2) is the fallback; signing up must not need a card.
+
+**Sound when screen sharing:** tab audio works when sharing a Chrome/Edge tab. Entire-screen sharing carries system audio only on Windows Chrome/Edge. The teacher should wear headphones to avoid echo.
 
 ## 8. Components
 
