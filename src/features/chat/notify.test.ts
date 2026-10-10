@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { initialToast, previewText, shouldNotify, titleWithCount, toastReducer } from './notify';
+import { chatSeen, initialToast, previewText, shouldNotify, titleWithCount, toastReducer } from './notify';
 
 describe('shouldNotify', () => {
   it('only for the other person while the panel is closed', () => {
@@ -53,5 +53,14 @@ describe('toastReducer', () => {
     const s = toastReducer(initialToast, { type: 'new', ...a });
     expect(toastReducer(s, { type: 'dismiss' })).toEqual(initialToast);
     expect(toastReducer(s, { type: 'open' })).toEqual(initialToast);
+  });
+});
+
+describe('chatSeen', () => {
+  it('is seen only when the chat is open and the tab is in view', () => {
+    expect(chatSeen({ open: true, hidden: false })).toBe(true);
+    expect(chatSeen({ open: true, hidden: true })).toBe(false);
+    expect(chatSeen({ open: false, hidden: false })).toBe(false);
+    expect(chatSeen({ open: false, hidden: true })).toBe(false);
   });
 });

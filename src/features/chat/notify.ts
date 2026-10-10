@@ -30,3 +30,8 @@ export function toastReducer(s: ToastState, a: ToastAction): ToastState {
       return initialToast;
   }
 }
+
+/** The chat counts as read only while it is open and the tab is actually in view. */
+export function chatSeen({ open, hidden }: { open: boolean; hidden: boolean }): boolean {
+  return open && !hidden;
+}

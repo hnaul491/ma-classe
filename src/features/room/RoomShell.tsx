@@ -9,9 +9,10 @@ import { isFileDrag } from '@/features/board/files';
 import { withTimeout } from '@/features/board/retry';
 import { ChatPanel } from '@/features/chat/ChatPanel';
 import { ChatToast } from '@/features/chat/ChatToast';
-import { initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
+import { chatSeen, initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
 import { playDing, useAudioUnlock, useChatMuted } from '@/features/chat/sound';
 import { useChat } from '@/features/chat/useChat';
+import { useTabHidden } from '@/features/chat/useTabHidden';
 import { useTabTitle } from '@/features/chat/useTabTitle';
 import type { BoardHandle } from '@/features/stage/Board';
 import { CameraTiles } from '@/features/stage/CameraTiles';
@@ -81,7 +82,7 @@ export function RoomShell({
   // Personal: each person opens and closes their own chat; it is not synced.
   // On board and screen stages (outside fullscreen, from sm up) the chat is docked under the cameras and
   // open by default; the Chat button folds it. Elsewhere it is the overlay panel, closed by default.
-  const wide = useMediaQuery('(min-width: 640px)');
+  const wide = useMediaQuery('(min-width: 1024px)');
   const railShown = visible !== 'cameras' && !fsActive;
   const docked = railShown && wide;
   const [overlayOpen, setOverlayOpen] = useState(false);
@@ -89,15 +90,17 @@ export function RoomShell({
   const chatOpen = docked ? !dockFolded : overlayOpen;
   const [draft, setDraft] = useState('');
   useAudioUnlock();
+  const tabHidden = useTabHidden();
+  // Read only while the chat is open and the tab is in view.
+  const seen = chatSeen({ open: chatOpen, hidden: tabHidden });
   const [toast, dispatchToast] = useReducer(toastReducer, initialToast);
   const [chatMuted, toggleChatMuted] = useChatMuted();
   const chat = useChat(lessonId, member, (m) => {
-    if (!shouldNotify({ fromSelf: m.authorEmail.toLowerCase() === member.email.toLowerCase(), panelOpen: chatOpen })) return;
+    if (!shouldNotify({ fromSelf: m.authorEmail.toLowerCase() === member.email.toLowerCase(), panelOpen: seen })) return;
     dispatchToast({ type: 'new', name: m.authorName, text: previewText(m.body) });
     void playDing();
   });
-  // A docked, visible chat counts as read.
-  useTabTitle(docked && chatOpen ? 0 : chat.unread);
+  useTabTitle(seen ? 0 : chat.unread);
   const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
   // Opening shows everything, and closing counts what arrived while it was open as read.
@@ -120,8 +123,12 @@ export function RoomShell({
   }, []);
   // Messages that arrive while the dock is on screen are read as they come.
   useEffect(() => {
-    if (docked && !dockFolded) markRead();
-  }, [docked, dockFolded, chat.messages, markRead]);
+    if (seen) markRead();
+  }, [seen, chat.messages, markRead]);
+  // A toast showing when the chat comes into view is stale.
+  useEffect(() => {
+    if (seen) dismissToast();
+  }, [seen, dismissToast]);
   const closeChat = useCallback(() => {
     setOverlayOpen(false);
     markRead();
@@ -292,7 +299,7 @@ export function RoomShell({
       onToggleBoard={toggleBoard}
       onToggleShare={() => void toggleShare()}
       chatOpen={chatOpen}
-      chatUnread={chatOpen ? 0 : chat.unread}
+      chatUnread={seen ? 0 : chat.unread}
       onToggleChat={toggleChat}
       chatButtonRef={chatButton}
       onEnd={() => void onEnd()}
@@ -327,7 +334,7 @@ export function RoomShell({
             <FloatingCams />
           ) : (
             <aside
-              className={`flex shrink-0 flex-col border-l border-line bg-surface ${dockOpen ? 'w-72' : 'w-44 overflow-y-auto'}`}
+              className={`flex shrink-0 flex-col border-l border-line bg-surface ${dockOpen ? 'min-h-0 w-72 overflow-hidden' : 'w-44 overflow-y-auto'}`}
             >
               {/* Over the board's top-right Library button was a collision: the button lives in the rail instead. */}
               <div className="flex shrink-0 justify-start px-2 pt-2">{fullscreenButton('')}</div>
@@ -338,7 +345,7 @@ export function RoomShell({
             </aside>
           ))}
 
-        {!railShown && (!fsActive || barVisible) && fullscreenButton(`absolute top-3 z-10 ${fsButtonRight}`)}
+        {!railShown && !fsActive && fullscreenButton(`absolute top-3 z-10 ${fsButtonRight}`)}
 
         {/* Over the right of the stage on every stage and in fullscreen, never over the control bar:
             the bar is outside this box normally, and in fullscreen the panel stops above it.
@@ -349,7 +356,13 @@ export function RoomShell({
           </div>
         )}
 
-        {fsActive && barVisible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
+        {/* The exit control sits beside the bar, never in the top-right corner where the board has its own buttons. */}
+        {fsActive && barVisible && (
+          <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
+            {renderBar(true)}
+            {fullscreenButton('')}
+          </div>
+        )}
 
         <div className="pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
           {toastMessage && (

@@ -25,7 +25,10 @@ export function ChatToast({
   const t = useT();
   const { latest, extra } = state;
   // The timer waits while the pointer or keyboard focus is on the card.
-  const [paused, setPaused] = useState(false);
+  // Tied to the message it paused, so the next message always starts its own 5 s.
+  const [pausedFor, setPausedFor] = useState<ToastState['latest']>(null);
+  const paused = latest !== null && pausedFor === latest;
+  const setPaused = (on: boolean) => setPausedFor(on ? latest : null);
 
   // Each new message restarts the 5 s.
   useEffect(() => {
