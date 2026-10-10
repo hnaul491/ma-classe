@@ -391,7 +391,9 @@ export default function Board({
     if (!visible || !api) return;
     api.refresh();
     if (!isStudent) viewportSender.current?.call(null);
-  }, [visible, api, isStudent]);
+    // Student: viewports received while hidden were applied at size 0, so ask the teacher for a fresh one.
+    else void send({ t: 'viewport-req' }).catch(() => {});
+  }, [visible, api, isStudent, send]);
 
   const onChange = useCallback((elements: readonly OrderedExcalidrawElement[]) => {
     latest.current = elements;

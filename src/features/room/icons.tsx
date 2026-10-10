@@ -70,3 +70,10 @@ export const ExitFullscreenIcon = () => (
     <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" />
   </svg>
 );
+
+export const BoardIcon = () => (
+  <svg {...stroke}>
+    <rect x="1.5" y="2.5" width="13" height="9" rx="1" />
+    <path d="M5 14.5l3-3 3 3" />
+  </svg>
+);

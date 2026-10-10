@@ -4,7 +4,7 @@ import { useTrackToggle } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
-import { CamIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
+import { BoardIcon, CamIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
 
 const btn = 'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-blue';
 
@@ -37,12 +37,16 @@ function IconButton({
 
 export function ControlBar({
   screenSharing,
+  boardActive,
+  onToggleBoard,
   onToggleShare,
   onEnd,
   planBUrl,
   compact = false,
 }: {
   screenSharing: boolean;
+  boardActive: boolean;
+  onToggleBoard: () => void;
   onToggleShare: () => void;
   onEnd: () => void;
   planBUrl: string;
@@ -80,6 +84,9 @@ export function ControlBar({
         {cam.enabled ? <CamIcon /> : <CamOffIcon />}
       </IconButton>
       <span className="mx-1 h-4 w-px bg-line" aria-hidden />
+      <IconButton label={boardActive ? t('bar.closeBoard') : t('bar.board')} active={boardActive} onClick={onToggleBoard}>
+        <BoardIcon />
+      </IconButton>
       <IconButton label={screenSharing ? t('bar.stopShare') : t('bar.share')} active={screenSharing} onClick={onToggleShare}>
         <ShareIcon />
       </IconButton>

@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { RoomAudioRenderer, useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
 import { RoomEvent, Track, type LocalTrackPublication, type Participant, type RemoteTrackPublication } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -30,8 +31,10 @@ import { useAutoHide } from './useAutoHide';
 import { useFullscreen } from './useFullscreen';
 import { useToast } from './useToast';
 
-/** Stage modules built so far. Plans 2 and 3 add 'board' and 'media'. */
-const AVAILABLE: readonly Stage[] = ['cameras', 'screen'];
+const Board = dynamic(() => import('@/features/stage/Board'), { ssr: false });
+
+/** Stage modules built so far. Plan 3 adds 'media'. */
+const AVAILABLE: readonly Stage[] = ['cameras', 'board', 'screen'];
 const STAGE_KEY: Record<Stage, MessageKey> = {
   cameras: 'stage.cameras',
   board: 'stage.board',
@@ -133,6 +136,10 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
     }
   }, [localParticipant, changeStage, showToast, t]);
 
+  const toggleBoard = useCallback(() => {
+    changeStage(stageRef.current.stage === 'board' ? 'cameras' : 'board');
+  }, [changeStage]);
+
   const onEnd = useCallback(async () => {
     try {
       await endLesson(lessonId);
@@ -156,6 +163,8 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
   const renderBar = (compact: boolean) => (
     <ControlBar
       screenSharing={isScreenShareEnabled}
+      boardActive={visible === 'board'}
+      onToggleBoard={toggleBoard}
       onToggleShare={() => void toggleShare()}
       onEnd={() => void onEnd()}
       planBUrl={planBUrl}
@@ -169,22 +178,21 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       <div ref={fsRef} onMouseMove={pokeBar} data-stage={visible} className="relative flex min-h-0 flex-1 bg-paper">
         {/* In fullscreen only this element is shown, so the banner must live inside it. */}
         {fsActive && <StatusBar planBUrl={planBUrl} since={reconnectingSince} overlay />}
-        {visible === 'cameras' ? (
-          <CameraTiles variant="stage" />
-        ) : (
-          <>
-            <main className="min-w-0 flex-1">
-              <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />
-            </main>
-            {fsActive ? (
-              <FloatingCams />
-            ) : (
-              <aside className="w-44 shrink-0 overflow-y-auto border-l border-line bg-surface">
-                <CameraTiles variant="rail" />
-              </aside>
-            )}
-          </>
-        )}
+        {visible === 'cameras' && <CameraTiles variant="stage" />}
+        <main className={visible === 'cameras' ? 'hidden' : 'min-w-0 flex-1'}>
+          <div className={visible === 'board' ? 'h-full' : 'hidden'}>
+            <Board lessonId={lessonId} member={member} visible={visible === 'board'} onError={(k) => showToast(t(k))} />
+          </div>
+          {visible === 'screen' && <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />}
+        </main>
+        {visible !== 'cameras' &&
+          (fsActive ? (
+            <FloatingCams />
+          ) : (
+            <aside className="w-44 shrink-0 overflow-y-auto border-l border-line bg-surface">
+              <CameraTiles variant="rail" />
+            </aside>
+          ))}
 
         {(!fsActive || barVisible) && (
           <button
