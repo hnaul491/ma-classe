@@ -14,10 +14,13 @@ create index if not exists vocab_lesson on public.vocab (lesson_id, created_at);
 create index if not exists vocab_created on public.vocab (created_at desc);
 
 -- The server's clock decides which edit is newer; who wrote it and when it was created never change.
+-- Empty search_path: nothing on the path can shadow now(), which is named in full.
 create or replace function public.vocab_touch() returns trigger
-language plpgsql as $$
+language plpgsql
+set search_path = ''
+as $$
 begin
-  new.updated_at := now();
+  new.updated_at := pg_catalog.now();
   new.created_at := old.created_at;
   new.created_by := old.created_by;
   return new;

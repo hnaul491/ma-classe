@@ -3,14 +3,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
-import { deleteWord, insertWord, updateWord, type VocabErrorKey } from './api';
+import { deleteWord, insertWord, updateWord, type DraftError, type VocabErrorKey } from './api';
 import { prepareWord, searchWords, type VocabDraft, type VocabWord } from './model';
 import { VocabForm } from './VocabForm';
-
-type DraftError = VocabErrorKey | 'vocab.frenchRequired' | 'vocab.tooLong';
-
-/** How long the "click again to delete" state lasts before it reverts. */
-const CONFIRM_MS = 4000;
+import { useReturnFocus, useWordItem, WordButtons, WordEditor, WordError, WordMeanings } from './WordItem';
 
 const HIDE_KEY = 'ma-classe:vocab-hide';
 const hideListeners = new Set<() => void>();
@@ -75,26 +71,9 @@ function BookItem({
   remove: (id: string) => Promise<VocabErrorKey | null>;
 }) {
   const t = useT();
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<VocabErrorKey | null>(null);
-  const editButton = useRef<HTMLButtonElement>(null);
-  const refocusEdit = useRef(false);
+  const { editButtonRef, ...item } = useWordItem({ id: word.id, editing, closeEdit: onCloseEdit, remove });
   const meaning = useRef<HTMLDivElement>(null);
   const revealing = useRef(false);
-
-  useEffect(() => {
-    if (!confirming) return;
-    const timer = setTimeout(() => setConfirming(false), CONFIRM_MS);
-    return () => clearTimeout(timer);
-  }, [confirming]);
-
-  // The edit form replaces the Edit button: once it closes, focus goes back to the button.
-  useEffect(() => {
-    if (editing || !refocusEdit.current) return;
-    refocusEdit.current = false;
-    editButton.current?.focus();
-  }, [editing]);
 
   // "Show meaning" disappears when clicked: focus goes to the text it revealed.
   useEffect(() => {
@@ -103,41 +82,7 @@ function BookItem({
     meaning.current?.focus();
   }, [masked]);
 
-  function closeEditor() {
-    refocusEdit.current = true;
-    onCloseEdit();
-  }
-
-  async function onDelete() {
-    if (!confirming) {
-      setConfirming(true);
-      setError(null);
-      return;
-    }
-    setConfirming(false);
-    setDeleting(true);
-    const err = await remove(word.id);
-    // On success the word leaves the list and this item unmounts.
-    setDeleting(false);
-    setError(err);
-  }
-
-  if (editing) {
-    return (
-      <div className="card p-4">
-        <VocabForm
-          initial={{ french: word.french, meaningVi: word.meaningVi, meaningEn: word.meaningEn, example: word.example }}
-          submitLabel={t('vocab.save')}
-          onSubmit={async (d) => {
-            const err = await update(word.id, d);
-            if (!err) closeEditor();
-            return err;
-          }}
-          onCancel={closeEditor}
-        />
-      </div>
-    );
-  }
+  if (editing) return <WordEditor word={word} update={update} item={item} className="card p-4" />;
 
   return (
     <div>
@@ -159,53 +104,12 @@ function BookItem({
           </button>
         ) : (
           <div ref={meaning} tabIndex={-1} className="mt-1 flex flex-col gap-0.5 rounded-md">
-            {word.meaningVi && (
-              <p lang="vi" className="break-words">
-                {word.meaningVi}
-              </p>
-            )}
-            {word.meaningEn && (
-              <p lang="en" className="break-words">
-                {word.meaningEn}
-              </p>
-            )}
-            {word.example && (
-              <p lang="fr" className="whitespace-pre-wrap break-words italic text-muted">
-                {word.example}
-              </p>
-            )}
+            <WordMeanings word={word} />
           </div>
         )}
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            ref={editButton}
-            type="button"
-            onClick={() => {
-              setError(null);
-              onEdit();
-            }}
-            className="btn btn-secondary btn-sm"
-          >
-            {t('vocab.edit')}
-          </button>
-          {teacher && (
-            <button
-              type="button"
-              onClick={() => void onDelete()}
-              onBlur={() => setConfirming(false)}
-              disabled={deleting}
-              className={`btn btn-sm ${confirming ? 'btn-danger' : 'btn-secondary'}`}
-            >
-              {t(confirming ? 'vocab.confirmDelete' : 'vocab.delete')}
-            </button>
-          )}
-        </div>
+        <WordButtons item={item} editButtonRef={editButtonRef} teacher={teacher} onEdit={onEdit} className="mt-2 flex flex-wrap gap-2" />
       </article>
-      {error && (
-        <p role="alert" className="mt-1 text-sm text-pen">
-          {t(error)}
-        </p>
-      )}
+      <WordError error={item.error} />
     </div>
   );
 }
@@ -231,16 +135,9 @@ export function VocabBook({
   const revealed = reveal.hide === hide ? reveal.ids : NONE;
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const addButton = useRef<HTMLButtonElement>(null);
-  const refocusAdd = useRef(false);
-  const shown = searchWords(words, query);
-
   // The add form replaces the Add button: once it closes, focus goes back to the button.
-  useEffect(() => {
-    if (adding || !refocusAdd.current) return;
-    refocusAdd.current = false;
-    addButton.current?.focus();
-  }, [adding]);
+  const { ref: addButtonRef, returnFocus: returnFocusToAdd } = useReturnFocus(adding);
+  const shown = searchWords(words, query);
 
   function toggleHide() {
     setReveal({ hide: !hide, ids: NONE });
@@ -292,7 +189,7 @@ export function VocabBook({
         </button>
         <span className="text-sm tabular-nums text-muted">{shown.length === 1 ? t('vocab.countOne') : t('vocab.count', { n: shown.length })}</span>
         {teacher && !adding && (
-          <button ref={addButton} type="button" onClick={() => setAdding(true)} className="btn btn-secondary btn-sm">
+          <button ref={addButtonRef} type="button" onClick={() => setAdding(true)} className="btn btn-secondary btn-sm">
             {t('vocab.add')}
           </button>
         )}
@@ -304,7 +201,7 @@ export function VocabBook({
             submitLabel={t('vocab.save')}
             onSubmit={add}
             onCancel={() => {
-              refocusAdd.current = true;
+              returnFocusToAdd();
               setAdding(false);
             }}
           />

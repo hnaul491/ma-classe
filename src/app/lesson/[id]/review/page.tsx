@@ -13,6 +13,7 @@ import { fromRow, VOCAB_COLUMNS, type VocabRow } from '@/features/vocab/model';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
 import { getLocale, getT, getThemePref, getTimeZone } from '@/lib/i18n/server';
+import { minutesBetween } from '@/lib/lessons/duration';
 import { createClient } from '@/lib/supabase/server';
 
 type LessonRow = { id: string; status: 'live' | 'ended'; started_at: string; ended_at: string | null };
@@ -20,11 +21,6 @@ type ChatRow = { id: string; author_email: string; author_name: string; body: st
 
 export async function generateMetadata(): Promise<Metadata> {
   return { title: 'Review · Ma Classe' };
-}
-
-function minutesBetween(a: string, b: string | null): number | null {
-  if (!b) return null;
-  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000);
 }
 
 /** A past lesson, read-only: its saved board, its chat and its words. */
