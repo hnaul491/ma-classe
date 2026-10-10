@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Bricolage_Grotesque, IBM_Plex_Sans } from "next/font/google";
 import { TimeZoneCookie } from "@/components/TimeZoneCookie";
 import { LocaleProvider } from "@/lib/i18n/client";
-import { getLocale } from "@/lib/i18n/server";
+import { getLocale, getThemePref } from "@/lib/i18n/server";
+import { themeAttribute } from "@/lib/theme";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -24,8 +25,9 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const locale = await getLocale();
+  const theme = await getThemePref();
   return (
-    <html lang={locale} className={`${bricolage.variable} ${plex.variable} h-full antialiased`}>
+    <html lang={locale} data-theme={themeAttribute(theme)} className={`${bricolage.variable} ${plex.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <LocaleProvider locale={locale}>
           <TimeZoneCookie />

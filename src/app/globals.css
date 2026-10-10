@@ -18,8 +18,27 @@
   --blue-soft: #e4e9fb;
 }
 
+/* Dark: chosen with the theme switch, or following a dark computer when set to Auto. */
+:root[data-theme="dark"] {
+  --paper: #11151c;
+  --surface: #19202a;
+  --surface-2: #222b37;
+  --ink: #e6eaf1;
+  --muted: #9ba5b6;
+  --line: #2d3644;
+  --pen: #ff6f62;
+  --pen-soft: #3a1f1f;
+  --hl: #6b5815;
+  --hl-ink: #fff3c4;
+  --good: #5fc78d;
+  --good-soft: #17301f;
+  --blue: #8ea7ff;
+  --blue-soft: #1f2846;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #11151c;
     --surface: #19202a;
     --surface-2: #222b37;
@@ -36,6 +55,10 @@
     --blue-soft: #1f2846;
     color-scheme: dark;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @theme inline {

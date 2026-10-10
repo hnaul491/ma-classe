@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Role } from '@/lib/lessons/types';
 import { playTestSound, useMicLevel } from './audio';
+import { MicTest } from './MicTest';
 
 /** Own component so the 60 fps level updates re-render only the meter, not the whole screen. */
 function MicMeter({ track, label }: { track?: MediaStreamTrack; label: string }) {
@@ -165,13 +166,16 @@ export function PreJoin({
           </label>
         )}
 
-        <button
-          type="button"
-          onClick={() => playTestSound(audioOutputId)}
-          className="btn btn-secondary btn-sm self-start"
-        >
-          {t('prejoin.testSound')}
-        </button>
+        <div className="flex flex-wrap items-start gap-2">
+          <button
+            type="button"
+            onClick={() => void playTestSound(audioOutputId)}
+            className="btn btn-secondary btn-sm"
+          >
+            {t('prejoin.testSound')}
+          </button>
+          <MicTest track={audioTrack?.mediaStreamTrack} outputDeviceId={audioOutputId} />
+        </div>
 
         <p className={`flex items-center gap-2 text-sm ${otherIn ? 'text-good' : 'text-muted'}`}>
           <span className={`size-2 rounded-full ${otherIn ? 'bg-good' : 'bg-line'}`} aria-hidden />

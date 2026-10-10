@@ -1,4 +1,5 @@
 import { cookies, headers } from 'next/headers';
+import { pickTheme, THEME_COOKIE, type ThemePref } from '@/lib/theme';
 import { isValidTimeZone, pickLocale, translate, type Locale, type MessageKey } from './messages';
 
 export async function getLocale(): Promise<Locale> {
@@ -15,6 +16,10 @@ export async function getTimeZone(): Promise<string> {
     tz = undefined;
   }
   return isValidTimeZone(tz) ? tz : 'Europe/Paris';
+}
+
+export async function getThemePref(): Promise<ThemePref> {
+  return pickTheme((await cookies()).get(THEME_COOKIE)?.value);
 }
 
 export async function getT() {

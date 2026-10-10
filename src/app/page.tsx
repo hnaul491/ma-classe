@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Wordmark } from '@/components/Wordmark';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
-import { getLocale, getT, getTimeZone } from '@/lib/i18n/server';
+import { getLocale, getT, getThemePref, getTimeZone } from '@/lib/i18n/server';
 import type { Lesson } from '@/lib/lessons/types';
 import { createClient } from '@/lib/supabase/server';
 import { startLesson } from './actions';
@@ -20,6 +21,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const locale = await getLocale();
   const t = await getT();
   const timeZone = await getTimeZone();
+  const theme = await getThemePref();
   // getMember throws when Supabase cannot answer; that reaches error.tsx, not the login page.
   const { member } = await getMember();
   if (!member) redirect('/login?denied=1');
@@ -46,6 +48,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-muted">
             {t(member.role === 'teacher' ? 'role.teacher' : 'role.student')}
           </span>
+          <ThemeSwitch initial={theme} />
           <LanguageSwitch />
         </div>
       </header>

@@ -1,6 +1,7 @@
 import { LanguageSwitch } from '@/components/LanguageSwitch';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Wordmark } from '@/components/Wordmark';
-import { getT } from '@/lib/i18n/server';
+import { getT, getThemePref } from '@/lib/i18n/server';
 import { DevLogin } from './DevLogin';
 import { GoogleButton } from './GoogleButton';
 
@@ -11,9 +12,11 @@ export default async function LoginPage({
 }) {
   const sp = await searchParams;
   const t = await getT();
+  const theme = await getThemePref();
   return (
     <main className="relative flex min-h-dvh flex-col items-center justify-center px-4 py-12">
-      <div className="absolute right-4 top-4">
+      <div className="absolute right-4 top-4 flex items-center gap-2">
+        <ThemeSwitch initial={theme} />
         <LanguageSwitch />
       </div>
 

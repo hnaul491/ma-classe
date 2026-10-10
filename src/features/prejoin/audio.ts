@@ -40,17 +40,37 @@ export function useMicLevel(track?: MediaStreamTrack): number {
   return level;
 }
 
-export function playTestSound(outputDeviceId?: string): void {
+/** Two-note chime on the chosen speaker. Resolves once it has been scheduled. */
+export async function playTestSound(outputDeviceId?: string): Promise<void> {
   const ctx = new AudioContext();
-  // AudioContext.setSinkId exists in Chromium; elsewhere the default speaker plays.
-  const sink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
-  if (outputDeviceId && sink.setSinkId) void sink.setSinkId(outputDeviceId).catch(() => {});
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.frequency.value = 440;
-  gain.gain.value = 0.15;
-  osc.connect(gain).connect(ctx.destination);
-  osc.onended = () => void ctx.close();
-  osc.start();
-  osc.stop(ctx.currentTime + 0.6);
+  try {
+    // The context can start suspended; wake it while we are still inside the click.
+    await ctx.resume();
+    // AudioContext.setSinkId exists in Chromium; elsewhere the default speaker plays.
+    // Wait for the switch, otherwise the chime can finish before the new speaker is used.
+    const sink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (outputDeviceId && sink.setSinkId) await sink.setSinkId(outputDeviceId).catch(() => {});
+
+    const start = ctx.currentTime + 0.05;
+    const notes = [
+      { freq: 880, at: 0 },
+      { freq: 659.25, at: 0.28 },
+    ];
+    for (const n of notes) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = n.freq;
+      // Short attack and a decay, so it sounds like a chime instead of a click.
+      gain.gain.setValueAtTime(0.0001, start + n.at);
+      gain.gain.exponentialRampToValueAtTime(0.35, start + n.at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + n.at + 0.6);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start + n.at);
+      osc.stop(start + n.at + 0.65);
+    }
+    setTimeout(() => void ctx.close(), 1500);
+  } catch {
+    void ctx.close();
+  }
 }
