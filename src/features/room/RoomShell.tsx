@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
 import { isFileDrag } from '@/features/board/files';
 import { withTimeout } from '@/features/board/retry';
+import { ChatPanel } from '@/features/chat/ChatPanel';
+import { useChat } from '@/features/chat/useChat';
 import type { BoardHandle } from '@/features/stage/Board';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
@@ -71,6 +73,19 @@ export function RoomShell({
   const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>(fullscreenKeyEnabled(visible));
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
+  const chat = useChat(lessonId, member);
+  // Personal: each person opens and closes their own chat; it is not synced.
+  const [chatOpen, setChatOpen] = useState(false);
+  const { markRead } = chat;
+  // Opening shows everything, and closing counts what arrived while it was open as read.
+  const toggleChat = useCallback(() => {
+    setChatOpen((o) => !o);
+    markRead();
+  }, [markRead]);
+  const closeChat = useCallback(() => {
+    setChatOpen(false);
+    markRead();
+  }, [markRead]);
 
   const applyStage = useCallback((next: StageState) => {
     stageRef.current = next;
@@ -203,6 +218,9 @@ export function RoomShell({
       boardActive={visible === 'board'}
       onToggleBoard={toggleBoard}
       onToggleShare={() => void toggleShare()}
+      chatOpen={chatOpen}
+      chatUnread={chatOpen ? 0 : chat.unread}
+      onToggleChat={toggleChat}
       onEnd={() => void onEnd()}
       planBUrl={planBUrl}
       startedAt={startedAt}
@@ -251,6 +269,19 @@ export function RoomShell({
             {fsActive ? <ExitFullscreenIcon /> : <FullscreenIcon />}
           </button>
         )}
+
+        {/* Over the right of the stage on every stage and in fullscreen, never over the control bar:
+            the bar is outside this box normally, and in fullscreen the panel stops above it. */}
+        <div className={chatOpen ? `absolute right-0 top-0 z-20 w-full p-2 sm:w-auto ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
+          <ChatPanel
+            open={chatOpen}
+            onClose={closeChat}
+            messages={chat.messages}
+            send={chat.send}
+            member={member}
+            loadFailed={chat.loadFailed}
+          />
+        </div>
 
         {fsActive && barVisible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
 

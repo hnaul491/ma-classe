@@ -128,6 +128,17 @@ export const en = {
   'documents.addToLesson': 'Add to today’s board',
   'documents.loading': 'Loading documents…',
   'documents.loadFailed': 'The documents could not be loaded. Check your connection and try again.',
+  'chat.title': 'Chat',
+  'chat.placeholder': 'Write a message…',
+  'chat.send': 'Send',
+  'chat.you': 'You',
+  'chat.unsaved': 'Not saved',
+  'chat.empty': 'Write something first.',
+  'chat.tooLong': 'Messages can be up to 2000 characters.',
+  'chat.loadFailed': 'Earlier messages could not be loaded.',
+  'chat.none': 'No messages yet.',
+  'bar.chat': 'Chat',
+  'bar.closeChat': 'Close chat',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -260,6 +271,17 @@ export const fr: Record<MessageKey, string> = {
   'documents.addToLesson': 'Ajouter au tableau du jour',
   'documents.loading': 'Chargement des documents…',
   'documents.loadFailed': 'Les documents n’ont pas pu être chargés. Vérifiez votre connexion et réessayez.',
+  'chat.title': 'Discussion',
+  'chat.placeholder': 'Écrire un message…',
+  'chat.send': 'Envoyer',
+  'chat.you': 'Vous',
+  'chat.unsaved': 'Non enregistré',
+  'chat.empty': 'Écrivez d’abord un message.',
+  'chat.tooLong': 'Un message peut contenir jusqu’à 2000 caractères.',
+  'chat.loadFailed': 'Les messages précédents n’ont pas pu être chargés.',
+  'chat.none': 'Aucun message pour l’instant.',
+  'bar.chat': 'Discussion',
+  'bar.closeChat': 'Fermer la discussion',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };

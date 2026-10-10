@@ -77,3 +77,9 @@ export const BoardIcon = () => (
     <path d="M5 14.5l3-3 3 3" />
   </svg>
 );
+
+export const ChatIcon = () => (
+  <svg {...stroke}>
+    <path d="M2.5 3.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H7l-3 2.5V11H3.5a1 1 0 0 1-1-1z" />
+  </svg>
+);
