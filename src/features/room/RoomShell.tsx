@@ -6,6 +6,8 @@ import { RoomEvent, Track, type LocalTrackPublication, type Participant, type Re
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
 import { isFileDrag } from '@/features/board/files';
+import { withTimeout } from '@/features/board/retry';
+import type { BoardHandle } from '@/features/stage/Board';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
 import { useT } from '@/lib/i18n/client';
@@ -16,7 +18,7 @@ import type { Member } from '@/lib/lessons/types';
 import { ControlBar } from './ControlBar';
 import { FloatingCams } from './FloatingCams';
 import { ExitFullscreenIcon, FullscreenIcon } from './icons';
-import { isUserCancel } from './keys';
+import { fullscreenKeyEnabled, isUserCancel } from './keys';
 import { SCREEN_CAPTURE } from './roomOptions';
 import {
   applyRemoteStage,
@@ -33,6 +35,9 @@ import { useFullscreen } from './useFullscreen';
 import { useToast } from './useToast';
 
 const Board = dynamic(() => import('@/features/stage/Board'), { ssr: false });
+
+/** End lesson waits this long for the board to save, then ends anyway. */
+const END_FLUSH_TIMEOUT_MS = 4000;
 
 /** Stage modules built so far. Plan 3 adds 'media'. */
 const AVAILABLE: readonly Stage[] = ['cameras', 'board', 'screen'];
@@ -61,7 +66,9 @@ export function RoomShell({
   const [stage, setStage] = useState<StageState>(initialStage);
   const stageRef = useRef(stage);
   const { message: toastMessage, show: showToast } = useToast();
-  const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>();
+  const board = useRef<BoardHandle | null>(null);
+  const visible = resolveVisibleStage(stage.stage, { screenActive: screenTracks.length > 0, available: AVAILABLE });
+  const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>(fullscreenKeyEnabled(visible));
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
 
@@ -155,6 +162,9 @@ export function RoomShell({
   }, [changeStage]);
 
   const onEnd = useCallback(async () => {
+    // Save the board first (a few seconds at most): the last strokes must reach storage.
+    const flush = board.current?.flush();
+    if (flush) await withTimeout(flush, END_FLUSH_TIMEOUT_MS, false);
     try {
       await endLesson(lessonId);
     } catch {
@@ -187,7 +197,6 @@ export function RoomShell({
     };
   }, [room, showToast, t]);
 
-  const visible = resolveVisibleStage(stage.stage, { screenActive: screenTracks.length > 0, available: AVAILABLE });
   const renderBar = (compact: boolean) => (
     <ControlBar
       screenSharing={isScreenShareEnabled}
@@ -210,7 +219,14 @@ export function RoomShell({
         {visible === 'cameras' && <CameraTiles variant="stage" />}
         <main className={visible === 'cameras' ? 'hidden' : 'min-w-0 flex-1'}>
           <div className={visible === 'board' ? 'h-full' : 'hidden'}>
-            <Board lessonId={lessonId} member={member} visible={visible === 'board'} onError={(k) => showToast(t(k))} onShow={showBoard} />
+            <Board
+              lessonId={lessonId}
+              member={member}
+              visible={visible === 'board'}
+              onError={(k) => showToast(t(k))}
+              onShow={showBoard}
+              flushRef={board}
+            />
           </div>
           {visible === 'screen' && <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />}
         </main>
@@ -227,7 +243,8 @@ export function RoomShell({
           <button
             type="button"
             onClick={() => void toggleFs()}
-            title={fsActive ? t('room.exitFullscreenHint') : t('room.fullscreenHint')}
+            // On the board, F is Excalidraw's frame tool, so the hint does not mention it.
+            title={fsActive ? t('room.exitFullscreenHint') : fullscreenKeyEnabled(visible) ? t('room.fullscreenHint') : t('room.fullscreen')}
             aria-label={fsActive ? t('room.exitFullscreen') : t('room.fullscreen')}
             className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${visible === 'cameras' || fsActive ? 'right-3' : 'right-48'}`}
           >

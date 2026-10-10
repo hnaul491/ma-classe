@@ -92,7 +92,7 @@ The **stage** (main area) shows one thing at a time. Cameras are always visible.
 | D | Screen share | Remote or own shared screen, with a "Stop sharing" bar for the sharer | Right column |
 | E | Media | Synced player; "Shrink" turns it into a floating mini player over the board. Audio-only clips play as a thin strip above the board instead of taking the stage. | Right column |
 | F | Problem | Current layout plus a yellow status bar ("Reconnecting… your board is saved"). A camera that is off shows an initial. After 30 seconds of failure, Plan B is suggested. | As current |
-| G | Fullscreen | Current stage fills the monitor (Fullscreen API). Cameras become 2 draggable, hideable floating tiles. A slim icon bar appears on mouse move and hides after 3 seconds. Opened with F, closed with Esc. | Floating |
+| G | Fullscreen | Current stage fills the monitor (Fullscreen API). Cameras become 2 draggable, hideable floating tiles. A slim icon bar appears on mouse move and hides after 3 seconds. Opened with F or the fullscreen button, closed with Esc. On the board stage, F stays Excalidraw's frame tool, so fullscreen is opened with the button only (its tooltip does not mention F). | Floating |
 
 ### Layout rules
 

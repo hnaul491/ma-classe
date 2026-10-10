@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- signed Supabase URLs expire; next/image would cache them under its own URL. */
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import { filterDocuments, type DocumentGroup } from './group';
@@ -17,6 +17,26 @@ type T = ReturnType<typeof useT>;
 
 function pagesLabel(t: T, n: number) {
   return n === 1 ? t('documents.onePage') : t('documents.pages', { n });
+}
+
+/**
+ * Fresh signed URLs for images whose URL failed (expired). Each path is re-signed once, so a
+ * missing file does not loop. Returns the renewed URLs by path and the `onError` handler.
+ */
+function useResignedUrls() {
+  const [fresh, setFresh] = useState<Record<string, string>>({});
+  const tried = useRef(new Set<string>());
+  const resign = useCallback((path: string) => {
+    if (tried.current.has(path)) return;
+    tried.current.add(path);
+    void createBrowserSupabase()
+      .storage.from(BUCKET)
+      .createSignedUrl(path, SIGNED_URL_SECONDS)
+      .then(({ data }) => {
+        if (data?.signedUrl) setFresh((prev) => ({ ...prev, [path]: data.signedUrl }));
+      }, () => {});
+  }, []);
+  return [fresh, resign] as const;
 }
 
 /**
@@ -41,6 +61,7 @@ export function DocumentsBrowser({
   const t = useT();
   const [query, setQuery] = useState('');
   const [viewing, setViewing] = useState<DocumentGroup | null>(null);
+  const [freshThumbs, resignThumb] = useResignedUrls();
   const shown = filterDocuments(docs, query);
 
   if (docs.length === 0) {
@@ -64,7 +85,8 @@ export function DocumentsBrowser({
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {shown.map((d) => {
-            const thumb = thumbs[d.pages[0].storage_path];
+            const thumbPath = d.pages[0].storage_path;
+            const thumb = freshThumbs[thumbPath] ?? thumbs[thumbPath];
             const date = lessonDates[d.lessonId];
             return (
               <li key={d.id} className="min-w-0">
@@ -74,7 +96,13 @@ export function DocumentsBrowser({
                   className="card flex w-full flex-col overflow-hidden text-left transition-colors hover:border-blue"
                 >
                   {thumb ? (
-                    <img src={thumb} alt={d.name} loading="lazy" className="aspect-[3/4] w-full bg-surface-2 object-cover object-top" />
+                    <img
+                      src={thumb}
+                      alt={d.name}
+                      loading="lazy"
+                      onError={() => resignThumb(thumbPath)}
+                      className="aspect-[3/4] w-full bg-surface-2 object-cover object-top"
+                    />
                   ) : (
                     <span aria-hidden className="flex aspect-[3/4] w-full items-center justify-center bg-surface-2 font-display text-lg font-bold text-muted">
                       {d.kind === 'pdf' ? 'PDF' : 'IMG'}
@@ -95,7 +123,14 @@ export function DocumentsBrowser({
           })}
         </ul>
       )}
-      {viewing && <DocumentViewer doc={viewing} firstThumb={thumbs[viewing.pages[0].storage_path]} liveLessonId={liveLessonId} onClose={() => setViewing(null)} />}
+      {viewing && (
+        <DocumentViewer
+          doc={viewing}
+          firstThumb={freshThumbs[viewing.pages[0].storage_path] ?? thumbs[viewing.pages[0].storage_path]}
+          liveLessonId={liveLessonId}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -114,19 +149,7 @@ function DocumentViewer({
   const t = useT();
   const [urls, setUrls] = useState<Record<string, string>>(() => (firstThumb ? { [doc.pages[0].storage_path]: firstThumb } : {}));
   const [failed, setFailed] = useState(false);
-  /** Paths already re-signed after an image error, so an expired URL is renewed once, not in a loop. */
-  const resigned = useRef(new Set<string>());
-
-  function resign(path: string) {
-    if (resigned.current.has(path)) return;
-    resigned.current.add(path);
-    void createBrowserSupabase()
-      .storage.from(BUCKET)
-      .createSignedUrl(path, SIGNED_URL_SECONDS)
-      .then(({ data }) => {
-        if (data?.signedUrl) setUrls((prev) => ({ ...prev, [path]: data.signedUrl }));
-      }, () => {});
-  }
+  const [fresh, resign] = useResignedUrls();
   const [current, setCurrent] = useState(0);
   const pageRefs = useRef<(HTMLElement | null)[]>([]);
 
@@ -217,7 +240,7 @@ function DocumentViewer({
           </nav>
         )}
         {doc.pages.map((p, i) => {
-          const url = urls[p.storage_path];
+          const url = fresh[p.storage_path] ?? urls[p.storage_path];
           const alt = doc.pages.length > 1 ? `${doc.name} – ${t('board.page', { n: i + 1 })}` : doc.name;
           return (
             <figure

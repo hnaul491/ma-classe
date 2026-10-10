@@ -47,3 +47,8 @@ export function legacyFileRow(r: Omit<FileRow, 'document_id' | 'page_index'>): F
 export function shouldRetryWithoutDocumentColumns(error: { code?: string } | null): boolean {
   return error?.code === 'PGRST204' || error?.code === '42703';
 }
+
+/** The files table does not exist yet (before migration 0003): PostgREST PGRST205, Postgres 42P01. Read as an empty library. */
+export function isMissingTable(error: { code?: string } | null): boolean {
+  return error?.code === 'PGRST205' || error?.code === '42P01';
+}

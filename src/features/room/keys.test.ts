@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTypingElement, isUserCancel } from './keys';
+import { fullscreenKeyEnabled, isTypingElement, isUserCancel } from './keys';
 
 describe('isTypingElement', () => {
   it('treats inputs, textareas, selects and editable elements as typing targets (F must not toggle fullscreen)', () => {
@@ -22,5 +22,16 @@ describe('isUserCancel', () => {
     expect(isUserCancel({ name: 'AbortError' })).toBe(true);
     expect(isUserCancel(new Error('boom'))).toBe(false);
     expect(isUserCancel(null)).toBe(false);
+  });
+});
+
+describe('fullscreenKeyEnabled', () => {
+  it('leaves F to Excalidraw (frame tool) on the board stage', () => {
+    expect(fullscreenKeyEnabled('board')).toBe(false);
+  });
+
+  it('lets F toggle fullscreen on the other stages', () => {
+    expect(fullscreenKeyEnabled('cameras')).toBe(true);
+    expect(fullscreenKeyEnabled('screen')).toBe(true);
   });
 });

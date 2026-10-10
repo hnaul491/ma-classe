@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTypingElement } from './keys';
 
-export function useFullscreen<T extends HTMLElement>() {
+/** `keyEnabled`: whether F toggles fullscreen (not on the board, where F is Excalidraw's frame tool). */
+export function useFullscreen<T extends HTMLElement>(keyEnabled = true) {
   const ref = useRef<T | null>(null);
   const [active, setActive] = useState(false);
+  const keyEnabledRef = useRef(keyEnabled);
+  useEffect(() => {
+    keyEnabledRef.current = keyEnabled;
+  });
 
   useEffect(() => {
     const onChange = () => setActive(document.fullscreenElement !== null && document.fullscreenElement === ref.current);
@@ -25,6 +30,7 @@ export function useFullscreen<T extends HTMLElement>() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'f' && e.key !== 'F') return;
+      if (!keyEnabledRef.current) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (isTypingElement(e.target as HTMLElement | null)) return;
       e.preventDefault();

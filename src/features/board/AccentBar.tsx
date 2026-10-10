@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { ACCENTS, insertAtCursor, isTextTarget } from './accents';
 
-/** Types into the last focused text field. The board's text editor is a textarea. */
+/** Types into the focused text field. The board's text editor is a textarea. */
 export function AccentBar() {
   const t = useT();
   const target = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLElement | null>(null);
@@ -30,7 +30,8 @@ export function AccentBar() {
 
   function insert(ch: string) {
     const el = target.current;
-    if (!el || !el.isConnected) return;
+    // Only while that field still has focus: a closed or blurred editor must not get the letter.
+    if (!el || el !== document.activeElement) return;
     if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
       const next = insertAtCursor(el.value, el.selectionStart, el.selectionEnd, ch);
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;

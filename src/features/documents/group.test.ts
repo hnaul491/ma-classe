@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterDocuments, groupDocuments, legacyFileRow, type FileRow } from './group';
+import { filterDocuments, groupDocuments, isMissingTable, legacyFileRow, type FileRow } from './group';
 
 function row(p: Partial<FileRow> & { id: string }): FileRow {
   return {
@@ -68,5 +68,14 @@ describe('legacyFileRow', () => {
     void document_id;
     void page_index;
     expect(legacyFileRow(legacy)).toEqual({ ...legacy, document_id: null, page_index: 0 });
+  });
+});
+
+describe('isMissingTable', () => {
+  it('recognises the files table not existing yet (before migration 0003)', () => {
+    expect(isMissingTable({ code: 'PGRST205' })).toBe(true); // PostgREST: not in the schema cache
+    expect(isMissingTable({ code: '42P01' })).toBe(true); // Postgres: undefined table
+    expect(isMissingTable({ code: '42703' })).toBe(false);
+    expect(isMissingTable(null)).toBe(false);
   });
 });
