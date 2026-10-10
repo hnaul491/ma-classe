@@ -1,7 +1,9 @@
+import { isLocalSupabaseUrl } from '../src/lib/e2eGuard';
+
 export default function globalSetup() {
   if (process.env.E2E_ALLOW !== '1' || process.env.NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN !== '1') {
     throw new Error(
-      'E2E tests only run against the dev Supabase project: set E2E_ALLOW=1 and NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN=1 in .env.local',
+      'E2E tests only run against a local Supabase stack: set E2E_ALLOW=1 and NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN=1 in .env.local',
     );
   }
   const required = [
@@ -19,5 +21,11 @@ export default function globalSetup() {
   const missing = required.filter((name) => !process.env[name]);
   if (missing.length > 0) {
     throw new Error(`Missing environment variables for e2e: ${missing.join(', ')}`);
+  }
+  // The tests use the service-role key to end live lessons; never let that touch production.
+  if (!isLocalSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL!)) {
+    throw new Error(
+      'E2E tests only run against a local Supabase stack (supabase start). Refusing: NEXT_PUBLIC_SUPABASE_URL is not localhost.',
+    );
   }
 }
