@@ -76,6 +76,7 @@ export function RoomShell({
   const chat = useChat(lessonId, member);
   // Personal: each person opens and closes their own chat; it is not synced.
   const [chatOpen, setChatOpen] = useState(false);
+  const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
   // Opening shows everything, and closing counts what arrived while it was open as read.
   const toggleChat = useCallback(() => {
@@ -85,6 +86,7 @@ export function RoomShell({
   const closeChat = useCallback(() => {
     setChatOpen(false);
     markRead();
+    chatButton.current?.focus();
   }, [markRead]);
 
   const applyStage = useCallback((next: StageState) => {
@@ -212,6 +214,18 @@ export function RoomShell({
     };
   }, [room, showToast, t]);
 
+  // The camera rail (w-44) is shown on board and screen stages outside fullscreen.
+  const railShown = visible !== 'cameras' && !fsActive;
+  const chatRight = railShown ? 'right-0 sm:right-44' : 'right-0';
+  // Keep the fullscreen button clear of the open panel (panel w-80 + p-2 on each side = 21rem, plus a gap).
+  const fsButtonRight = chatOpen
+    ? railShown
+      ? 'right-48 sm:right-[32.5rem]'
+      : 'right-3 sm:right-[21.5rem]'
+    : railShown
+      ? 'right-48'
+      : 'right-3';
+
   const renderBar = (compact: boolean) => (
     <ControlBar
       screenSharing={isScreenShareEnabled}
@@ -221,6 +235,7 @@ export function RoomShell({
       chatOpen={chatOpen}
       chatUnread={chatOpen ? 0 : chat.unread}
       onToggleChat={toggleChat}
+      chatButtonRef={chatButton}
       onEnd={() => void onEnd()}
       planBUrl={planBUrl}
       startedAt={startedAt}
@@ -264,22 +279,23 @@ export function RoomShell({
             // On the board, F is Excalidraw's frame tool, so the hint does not mention it.
             title={fsActive ? t('room.exitFullscreenHint') : fullscreenKeyEnabled(visible) ? t('room.fullscreenHint') : t('room.fullscreen')}
             aria-label={fsActive ? t('room.exitFullscreen') : t('room.fullscreen')}
-            className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${visible === 'cameras' || fsActive ? 'right-3' : 'right-48'}`}
+            className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${fsButtonRight}`}
           >
             {fsActive ? <ExitFullscreenIcon /> : <FullscreenIcon />}
           </button>
         )}
 
         {/* Over the right of the stage on every stage and in fullscreen, never over the control bar:
-            the bar is outside this box normally, and in fullscreen the panel stops above it. */}
-        <div className={chatOpen ? `absolute right-0 top-0 z-20 w-full p-2 sm:w-auto ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
+            the bar is outside this box normally, and in fullscreen the panel stops above it.
+            Beside the camera rail, not over it; on a phone it takes the whole width. */}
+        <div className={chatOpen ? `absolute top-0 z-20 w-full p-2 sm:w-auto ${chatRight} ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
           <ChatPanel
             open={chatOpen}
             onClose={closeChat}
             messages={chat.messages}
             send={chat.send}
             member={member}
-            loadFailed={chat.loadFailed}
+            history={chat.history}
           />
         </div>
 

@@ -98,6 +98,31 @@ export function linkify(body: string): Segment[] {
   return out;
 }
 
-export function shouldSendOnKey(e: { key: string; shiftKey: boolean; isComposing: boolean }): boolean {
-  return e.key === 'Enter' && !e.shiftKey && !e.isComposing;
+/** The length counter appears past this many characters. */
+export const COUNTER_FROM = 1800;
+
+/** Trimmed length to show in the counter, or null while the message is comfortably short. */
+export function charCount(raw: string): number | null {
+  const n = raw.trim().length;
+  return n > COUNTER_FROM ? n : null;
+}
+
+/** HH:mm for a message, or '' for a date that cannot be parsed (never throws). */
+export function formatChatTime(iso: string, fmt: Intl.DateTimeFormat): string {
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? '' : fmt.format(t);
+}
+
+export type HistoryState = 'loading' | 'ready' | 'failed';
+
+/** Once history has loaded, a failed reload (after a reconnect) keeps it: the list is still the history. */
+export function nextHistoryState(prev: HistoryState, ok: boolean): HistoryState {
+  return ok || prev === 'ready' ? 'ready' : 'failed';
+}
+
+/** Safari fires the Enter that commits an IME composition with isComposing false but keyCode 229. */
+const IME_KEYCODE = 229;
+
+export function shouldSendOnKey(e: { key: string; shiftKey: boolean; isComposing: boolean; keyCode?: number }): boolean {
+  return e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== IME_KEYCODE;
 }

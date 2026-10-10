@@ -3,9 +3,22 @@
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useState } from 'react';
+import { withTimeout } from '@/features/board/retry';
 import type { Member } from '@/lib/lessons/types';
 import { createBrowserSupabase } from '@/lib/supabase/client';
-import { CHAT_TOPIC, decodeChat, encodeChat, mergeMessages, prepareMessage, type ChatMessage } from './model';
+import {
+  CHAT_TOPIC,
+  decodeChat,
+  encodeChat,
+  mergeMessages,
+  nextHistoryState,
+  prepareMessage,
+  type ChatMessage,
+  type HistoryState,
+} from './model';
+
+/** A save that has not answered after this long is shown as not saved. */
+const INSERT_TIMEOUT_MS = 10_000;
 
 type ChatRow = {
   id: string;
@@ -48,16 +61,16 @@ const sameEmail = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 export function useChat(lessonId: string, member: Member) {
   const room = useRoomContext();
   const [state, setState] = useState<ChatState>(() => ({ messages: [], read: new Set() }));
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [history, setHistory] = useState<HistoryState>('loading');
 
   /** `initial`: what was said before we joined is not "unread"; what a reconnect catches up on is. */
-  const applyHistory = useEffectEvent((history: ChatMessage[] | null, initial: boolean) => {
-    setLoadFailed(history === null);
-    if (!history) return;
+  const applyHistory = useEffectEvent((loaded: ChatMessage[] | null, initial: boolean) => {
+    setHistory((h) => nextHistoryState(h, loaded !== null));
+    if (!loaded) return;
     setState((s) => {
       const known = new Set(s.messages.map((m) => m.id));
-      const read = initial ? new Set([...s.read, ...history.filter((m) => !known.has(m.id)).map((m) => m.id)]) : s.read;
-      return { messages: mergeMessages(s.messages, history), read };
+      const read = initial ? new Set([...s.read, ...loaded.filter((m) => !known.has(m.id)).map((m) => m.id)]) : s.read;
+      return { messages: mergeMessages(s.messages, loaded), read };
     });
   });
 
@@ -94,17 +107,28 @@ export function useChat(lessonId: string, member: Member) {
       const m = decodeChat(text, lessonId);
       if (!m) return;
       const identity = info.identity;
-      receive({ ...m, authorEmail: identity, authorName: room.getParticipantByIdentity(identity)?.name || identity });
+      receive({
+        ...m,
+        authorEmail: identity,
+        authorName: room.getParticipantByIdentity(identity)?.name || identity,
+        // Our own clock, not the sender's: two clocks that disagree must not reorder the conversation.
+        // The history reload replaces it with the server's created_at.
+        createdAt: new Date().toISOString(),
+      });
     });
     return () => room.unregisterTextStreamHandler(CHAT_TOPIC);
   }, [room, lessonId]);
 
-  const setStatus = useCallback((id: string, status: 'saved' | 'unsaved') => {
-    setState((s) => ({
-      ...s,
-      // A history reload may already have brought the saved row; never downgrade it.
-      messages: s.messages.map((m) => (m.id === id && m.status !== 'saved' ? { ...m, status } : m)),
-    }));
+  /** `createdAt`: the server's time for a saved row, so our own messages sort on the same clock as history. */
+  const settle = useCallback((id: string, result: { createdAt: string } | null) => {
+    setState((s) => {
+      const messages = s.messages.map((m) => {
+        // A history reload may already have brought the saved row; never downgrade it.
+        if (m.id !== id || m.status === 'saved') return m;
+        return result ? { ...m, status: 'saved' as const, createdAt: result.createdAt } : { ...m, status: 'unsaved' as const };
+      });
+      return { ...s, messages: mergeMessages(messages, []) };
+    });
   }, []);
 
   const send = useCallback(
@@ -117,29 +141,29 @@ export function useChat(lessonId: string, member: Member) {
         authorEmail: member.email,
         authorName: member.display_name,
         body: prepared.body,
-        // Shown with the client clock until a history reload brings the server's created_at.
+        // Shown with the client clock until the insert returns the server's created_at.
         createdAt: new Date().toISOString(),
         status: 'sending',
       };
       setState((s) => ({ ...s, messages: mergeMessages(s.messages, [m]) }));
       room.localParticipant.sendText(encodeChat(m), { topic: CHAT_TOPIC }).catch(() => {});
-      let saved = false;
-      try {
-        const { error } = await createBrowserSupabase().from('chat').insert({
-          id: m.id,
-          lesson_id: lessonId,
-          author_email: member.email,
-          author_name: member.display_name,
-          body: m.body,
-        });
-        saved = !error;
-      } catch {
-        saved = false;
-      }
-      setStatus(m.id, saved ? 'saved' : 'unsaved');
+      const insert = async (): Promise<{ createdAt: string } | null> => {
+        const { data, error } = await createBrowserSupabase()
+          .from('chat')
+          .insert({ id: m.id, lesson_id: lessonId, author_email: member.email, author_name: member.display_name, body: m.body })
+          .select('created_at')
+          .single();
+        if (error) return null;
+        const serverTime = (data as { created_at?: unknown } | null)?.created_at;
+        // Saved either way; keep the client time only if the server's is somehow unusable.
+        const usable = typeof serverTime === 'string' && !Number.isNaN(Date.parse(serverTime));
+        return { createdAt: usable ? serverTime : m.createdAt };
+      };
+      // A rejected or hung insert counts as not saved.
+      settle(m.id, await withTimeout(insert(), INSERT_TIMEOUT_MS, null));
       return null;
     },
-    [room, lessonId, member.email, member.display_name, setStatus],
+    [room, lessonId, member.email, member.display_name, settle],
   );
 
   const { messages, read } = state;
@@ -149,5 +173,5 @@ export function useChat(lessonId: string, member: Member) {
 
   const unread = messages.filter((m) => !read.has(m.id) && !sameEmail(m.authorEmail, member.email)).length;
 
-  return { messages, send, unread, markRead, loadFailed };
+  return { messages, send, unread, markRead, history };
 }

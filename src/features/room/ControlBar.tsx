@@ -14,16 +14,19 @@ function IconButton({
   active = false,
   className = '',
   onClick,
+  ref,
   children,
 }: {
   label: string;
   active?: boolean;
   className?: string;
   onClick: () => void;
+  ref?: React.Ref<HTMLButtonElement>;
   children: React.ReactNode;
 }) {
   return (
     <button
+      ref={ref}
       type="button"
       title={label}
       aria-label={label}
@@ -65,6 +68,7 @@ export function ControlBar({
   chatOpen,
   chatUnread,
   onToggleChat,
+  chatButtonRef,
   onEnd,
   planBUrl,
   startedAt,
@@ -78,6 +82,8 @@ export function ControlBar({
   /** Messages from the other person not seen yet; shows a dot. */
   chatUnread: number;
   onToggleChat: () => void;
+  /** Focus returns here when the chat panel closes. */
+  chatButtonRef?: React.Ref<HTMLButtonElement>;
   onEnd: () => void;
   planBUrl: string;
   startedAt: string;
@@ -94,6 +100,7 @@ export function ControlBar({
     return () => clearTimeout(id);
   }, [confirmEnd]);
 
+  const chatLabel = chatOpen ? t('bar.closeChat') : chatUnread > 0 ? t('bar.chatUnread') : t('bar.chat');
   const endLabel = confirmEnd ? t('bar.confirmEnd') : t('bar.end');
   const onEndClick = () => {
     if (!confirmEnd) return setConfirmEnd(true);
@@ -122,7 +129,7 @@ export function ControlBar({
       <IconButton label={screenSharing ? t('bar.stopShare') : t('bar.share')} active={screenSharing} onClick={onToggleShare}>
         <ShareIcon />
       </IconButton>
-      <IconButton label={chatOpen ? t('bar.closeChat') : t('bar.chat')} active={chatOpen} onClick={onToggleChat} className="relative">
+      <IconButton label={chatLabel} active={chatOpen} onClick={onToggleChat} ref={chatButtonRef} className="relative">
         <ChatIcon />
         {chatUnread > 0 && (
           <span aria-hidden className="absolute right-1 top-1 size-2 rounded-full bg-pen ring-2 ring-surface" />

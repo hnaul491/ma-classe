@@ -139,6 +139,8 @@ export const en = {
   'chat.none': 'No messages yet.',
   'bar.chat': 'Chat',
   'bar.closeChat': 'Close chat',
+  'bar.chatUnread': 'Chat, new messages',
+  'chat.loading': 'Loading messages…',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -282,6 +284,8 @@ export const fr: Record<MessageKey, string> = {
   'chat.none': 'Aucun message pour l’instant.',
   'bar.chat': 'Discussion',
   'bar.closeChat': 'Fermer la discussion',
+  'bar.chatUnread': 'Discussion, nouveaux messages',
+  'chat.loading': 'Chargement des messages…',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { decodeChat, encodeChat, linkify, mergeMessages, prepareMessage, shouldSendOnKey, type ChatMessage } from './model';
+import {
+  charCount,
+  decodeChat,
+  encodeChat,
+  formatChatTime,
+  linkify,
+  mergeMessages,
+  nextHistoryState,
+  prepareMessage,
+  shouldSendOnKey,
+  type ChatMessage,
+} from './model';
 
 const L = '11111111-1111-4111-8111-111111111111';
 const msg = (over: Partial<ChatMessage>): ChatMessage => ({
@@ -170,5 +181,40 @@ describe('shouldSendOnKey', () => {
     expect(shouldSendOnKey({ key: 'Enter', shiftKey: true, isComposing: false })).toBe(false);
     expect(shouldSendOnKey({ key: 'Enter', shiftKey: false, isComposing: true })).toBe(false);
     expect(shouldSendOnKey({ key: 'a', shiftKey: false, isComposing: false })).toBe(false);
+  });
+  it('does not send on the Enter that commits an IME composition in Safari (keyCode 229)', () => {
+    expect(shouldSendOnKey({ key: 'Enter', shiftKey: false, isComposing: false, keyCode: 229 })).toBe(false);
+    expect(shouldSendOnKey({ key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13 })).toBe(true);
+  });
+});
+
+describe('charCount', () => {
+  it('stays hidden up to 1800 characters, then shows the trimmed length', () => {
+    expect(charCount('a'.repeat(1800))).toBeNull();
+    expect(charCount(`  ${'a'.repeat(1800)}  `)).toBeNull();
+    expect(charCount('a'.repeat(1801))).toBe(1801);
+    expect(charCount('a'.repeat(5000))).toBe(5000);
+  });
+});
+
+describe('formatChatTime', () => {
+  const fmt = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
+  it('formats a valid instant as HH:mm', () => {
+    expect(formatChatTime('2026-10-10T09:05:00.000Z', fmt)).toBe('09:05');
+  });
+  it('returns an empty string for a bad date instead of throwing', () => {
+    expect(formatChatTime('not a date', fmt)).toBe('');
+    expect(formatChatTime('', fmt)).toBe('');
+  });
+});
+
+describe('nextHistoryState', () => {
+  it('becomes ready on success and failed on a first failure', () => {
+    expect(nextHistoryState('loading', true)).toBe('ready');
+    expect(nextHistoryState('loading', false)).toBe('failed');
+    expect(nextHistoryState('failed', true)).toBe('ready');
+  });
+  it('stays ready when a reload after a reconnect fails: what is listed is still the history', () => {
+    expect(nextHistoryState('ready', false)).toBe('ready');
   });
 });

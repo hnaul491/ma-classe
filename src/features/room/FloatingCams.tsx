@@ -15,7 +15,7 @@ export function FloatingCams() {
       <button
         type="button"
         onClick={() => setHidden(false)}
-        className="fixed right-4 top-16 z-20 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium shadow hover:bg-surface-2"
+        className="fixed left-4 top-16 z-20 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium shadow hover:bg-surface-2"
       >
         {t('cams.show')}
       </button>
@@ -25,7 +25,8 @@ export function FloatingCams() {
   return (
     <div
       className="fixed z-20 w-36 cursor-grab touch-none rounded-lg bg-surface/90 shadow-xl active:cursor-grabbing"
-      style={pos ? { left: pos.x, top: pos.y } : { right: 16, top: 64 }}
+      // Top left by default: the chat panel opens on the right.
+      style={pos ? { left: pos.x, top: pos.y } : { left: 16, top: 64 }}
       onPointerDown={(e) => {
         const r = e.currentTarget.getBoundingClientRect();
         drag.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };

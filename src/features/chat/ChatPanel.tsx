@@ -1,10 +1,19 @@
 'use client';
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
-import { linkify, MAX_CHAT, prepareMessage, shouldSendOnKey, type ChatMessage } from './model';
+import {
+  charCount,
+  formatChatTime,
+  linkify,
+  MAX_CHAT,
+  prepareMessage,
+  shouldSendOnKey,
+  type ChatMessage,
+  type HistoryState,
+} from './model';
 
 /** Within this many pixels of the bottom counts as "at the bottom": new messages keep the list scrolled down. */
 const STICK_PX = 48;
@@ -33,14 +42,14 @@ export function ChatPanel({
   messages,
   send,
   member,
-  loadFailed = false,
+  history = 'ready',
 }: {
   open: boolean;
   onClose: () => void;
   messages: readonly ChatMessage[];
   send: (raw: string) => Promise<'chat.empty' | 'chat.tooLong' | null>;
   member: Member;
-  loadFailed?: boolean;
+  history?: HistoryState;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -55,11 +64,20 @@ export function ChatPanel({
     [locale],
   );
 
+  const stickToBottom = useEffectEvent(() => {
+    const el = list.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  });
+
   // Follow new messages unless the reader has scrolled up.
   useLayoutEffect(() => {
-    const el = list.current;
-    if (open && el && stick.current) el.scrollTop = el.scrollHeight;
+    if (open) stickToBottom();
   }, [messages, open]);
+
+  // Opening the panel puts the cursor in the message box.
+  useEffect(() => {
+    if (open) input.current?.focus();
+  }, [open]);
 
   // Grow from 1 to 4 lines, then scroll inside the box.
   useLayoutEffect(() => {
@@ -71,6 +89,8 @@ export function ChatPanel({
     const chrome = px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth);
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight + px(cs.borderTopWidth) + px(cs.borderBottomWidth), line * MAX_ROWS + chrome)}px`;
+    // A taller box makes the list shorter: keep the last message in view.
+    stickToBottom();
   }, [draft, open]);
 
   function submit() {
@@ -87,6 +107,9 @@ export function ChatPanel({
   }
 
   const mine = (m: ChatMessage) => m.authorEmail.toLowerCase() === member.email.toLowerCase();
+  const count = charCount(draft);
+  // Only when nothing is listed: after a failed reload what is shown is still the conversation.
+  const emptyNote = history === 'loading' ? 'chat.loading' : history === 'failed' ? 'chat.loadFailed' : 'chat.none';
 
   return (
     <section aria-label={t('chat.title')} hidden={!open} className="card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80">
@@ -107,13 +130,16 @@ export function ChatPanel({
         }}
         className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3"
       >
-        {loadFailed && <p className="text-xs text-muted">{t('chat.loadFailed')}</p>}
-        {messages.length === 0 && !loadFailed && <p className="text-sm text-muted">{t('chat.none')}</p>}
+        {messages.length === 0 ? (
+          <p className="text-sm text-muted">{t(emptyNote)}</p>
+        ) : (
+          history === 'failed' && <p className="text-xs text-muted">{t('chat.loadFailed')}</p>
+        )}
         {messages.map((m) => (
           <article key={m.id} className={mine(m) ? 'self-end text-right' : 'self-start'}>
             <div className="flex items-baseline gap-2 text-xs text-muted">
               <span className="font-semibold text-ink">{mine(m) ? t('chat.you') : m.authorName}</span>
-              <time dateTime={m.createdAt}>{time.format(new Date(m.createdAt))}</time>
+              <time dateTime={m.createdAt}>{formatChatTime(m.createdAt, time)}</time>
             </div>
             <div className={`mt-0.5 inline-block max-w-full rounded-lg px-2.5 py-1.5 text-left ${mine(m) ? 'bg-surface-2' : 'border border-line'}`}>
               <Body text={m.body} />
@@ -135,7 +161,6 @@ export function ChatPanel({
           <textarea
             ref={input}
             rows={1}
-            maxLength={MAX_CHAT}
             value={draft}
             placeholder={t('chat.placeholder')}
             aria-label={t('chat.placeholder')}
@@ -146,7 +171,8 @@ export function ChatPanel({
               if (error) setError(null);
             }}
             onKeyDown={(e) => {
-              if (shouldSendOnKey({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing })) {
+              const { key, shiftKey, keyCode, isComposing } = e.nativeEvent;
+              if (shouldSendOnKey({ key, shiftKey, isComposing, keyCode })) {
                 e.preventDefault();
                 submit();
               }
@@ -157,10 +183,21 @@ export function ChatPanel({
             {t('chat.send')}
           </button>
         </div>
-        {error && (
-          <p id="chat-error" role="alert" className="text-xs text-pen">
-            {t(error)}
-          </p>
+        {(error || count !== null) && (
+          <div className="flex items-start justify-between gap-2 text-xs">
+            {error ? (
+              <p id="chat-error" role="alert" className="text-pen">
+                {t(error)}
+              </p>
+            ) : (
+              <span />
+            )}
+            {count !== null && (
+              <span className={`[font-variant-numeric:tabular-nums] ${count > MAX_CHAT ? 'font-semibold text-pen' : 'text-muted'}`}>
+                {count}/{MAX_CHAT}
+              </span>
+            )}
+          </div>
         )}
       </form>
     </section>
