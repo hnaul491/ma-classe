@@ -189,6 +189,7 @@ export const en = {
   'vocab.notReady': 'Vocabulary isn’t set up yet. Run migration 0007 in Supabase.',
   'vocab.notAllowed': 'Only the teacher can add or delete words.',
   'vocab.saveFailed': 'Not saved. Check the connection and try again.',
+  'side.unread': 'New',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -382,6 +383,7 @@ export const fr: Record<MessageKey, string> = {
   'vocab.notReady': 'Le vocabulaire n’est pas encore prêt. Lancez la migration 0007 dans Supabase.',
   'vocab.notAllowed': 'L’ajout et la suppression de mots sont réservés à votre prof.',
   'vocab.saveFailed': 'Non enregistré. Vérifiez la connexion et réessayez.',
+  'side.unread': 'Nouveau',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };

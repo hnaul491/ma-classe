@@ -2,7 +2,6 @@
 
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
-import { BellIcon, BellOffIcon } from '@/features/room/icons';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
 import {
@@ -37,32 +36,30 @@ function Body({ text }: { text: string }) {
   );
 }
 
+/** The list and the message box only: the side panel around it supplies the frame and the header. */
 export function ChatPanel({
-  open,
-  onClose,
+  visible,
   messages,
   send,
   member,
   history = 'ready',
-  muted = false,
-  onToggleMuted,
-  docked = false,
   draft,
   onDraftChange,
+  focusInput = false,
+  onInputFocused,
 }: {
-  open: boolean;
-  onClose: () => void;
+  /** The side panel is open (scrolling and sizing need the list on screen). */
+  visible: boolean;
   messages: readonly ChatMessage[];
   send: (raw: string) => Promise<'chat.empty' | 'chat.tooLong' | null>;
   member: Member;
   history?: HistoryState;
-  muted?: boolean;
-  onToggleMuted?: () => void;
-  /** Fixed in a column (no overlay card, no close button). */
-  docked?: boolean;
-  /** The draft lives in the parent so the docked and overlay panels share it. */
+  /** The draft lives in the parent so it survives tab switches and the docked/overlay switch. */
   draft: string;
   onDraftChange: (v: string) => void;
+  /** Put the cursor in the message box as soon as it is on screen (even on mount), then call `onInputFocused`. */
+  focusInput?: boolean;
+  onInputFocused?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -84,15 +81,23 @@ export function ChatPanel({
 
   // Follow new messages unless the reader has scrolled up.
   useLayoutEffect(() => {
-    if (open) stickToBottom();
-  }, [messages, open]);
+    if (visible) stickToBottom();
+  }, [messages, visible]);
 
   // Opening the panel puts the cursor in the message box (not when it simply starts out open).
-  const wasOpen = useRef(open);
+  const wasVisible = useRef(visible);
   useEffect(() => {
-    if (open && !wasOpen.current) input.current?.focus();
-    wasOpen.current = open;
-  }, [open]);
+    if (visible && !wasVisible.current) input.current?.focus();
+    wasVisible.current = visible;
+  }, [visible]);
+
+  // A request from outside (a click on the new-message toast), also when this panel has just mounted.
+  const inputFocused = useEffectEvent(() => onInputFocused?.());
+  useEffect(() => {
+    if (!visible || !focusInput) return;
+    input.current?.focus();
+    inputFocused();
+  }, [visible, focusInput]);
 
   // Grow from 1 to 4 lines, then scroll inside the box.
   useLayoutEffect(() => {
@@ -106,7 +111,7 @@ export function ChatPanel({
     el.style.height = `${Math.min(el.scrollHeight + px(cs.borderTopWidth) + px(cs.borderBottomWidth), line * MAX_ROWS + chrome)}px`;
     // A taller box makes the list shorter: keep the last message in view.
     stickToBottom();
-  }, [draft, open]);
+  }, [draft, visible]);
 
   function submit() {
     const prepared = prepareMessage(draft);
@@ -127,38 +132,7 @@ export function ChatPanel({
   const emptyNote = history === 'loading' ? 'chat.loading' : history === 'failed' ? 'chat.loadFailed' : 'chat.none';
 
   return (
-    <section
-      aria-label={t('chat.title')}
-      hidden={!open}
-      className={
-        docked
-          ? `${open ? 'flex' : 'hidden'} min-h-0 w-full flex-1 flex-col overflow-hidden border-t border-line`
-          : 'card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80'
-      }
-    >
-      <header className="flex items-center justify-between border-b border-line px-3 py-2">
-        <h2 className="text-sm font-semibold">{t('chat.title')}</h2>
-        <div className="flex items-center gap-2">
-          {onToggleMuted && (
-            <button
-              type="button"
-              onClick={onToggleMuted}
-              aria-pressed={muted}
-              aria-label={t('chat.muteSound')}
-              title={t('chat.muteSound')}
-              className="btn btn-secondary btn-sm"
-            >
-              {muted ? <BellOffIcon /> : <BellIcon />}
-            </button>
-          )}
-          {!docked && (
-            <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
-              {t('common.close')}
-            </button>
-          )}
-        </div>
-      </header>
-
+    <>
       <div
         ref={list}
         role="log"
@@ -239,6 +213,6 @@ export function ChatPanel({
           </div>
         )}
       </form>
-    </section>
+    </>
   );
 }

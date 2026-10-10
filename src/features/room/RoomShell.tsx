@@ -22,6 +22,8 @@ import { ScreenView } from '@/features/stage/ScreenView';
 import { useT } from '@/lib/i18n/client';
 import type { Stage, SyncMessage } from '@/features/sync/protocol';
 import { useSync } from '@/features/sync/useSync';
+import { useVocab } from '@/features/vocab/useVocab';
+import { VocabPanel } from '@/features/vocab/VocabPanel';
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { Member } from '@/lib/lessons/types';
 import { ControlBar } from './ControlBar';
@@ -29,6 +31,7 @@ import { FloatingCams } from './FloatingCams';
 import { ExitFullscreenIcon, FullscreenIcon } from './icons';
 import { fullscreenKeyEnabled, isUserCancel } from './keys';
 import { SCREEN_CAPTURE } from './roomOptions';
+import { SidePanel, type SideTab } from './SidePanel';
 import {
   applyRemoteStage,
   initialStage,
@@ -91,11 +94,22 @@ export function RoomShell({
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [dockFolded, setDockFolded] = useState(false);
   const chatOpen = docked ? !dockFolded : overlayOpen;
+  // The side panel shows the chat or the lesson's vocabulary; personal too, and kept when the panel closes.
+  const [sideTab, setSideTab] = useState<SideTab>('chat');
   const [draft, setDraft] = useState('');
+  // Set by a click on the new-message toast: the message box takes the cursor once the chat is on screen.
+  const [chatFocusPending, setChatFocusPending] = useState(false);
   useAudioUnlock();
   const tabHidden = useTabHidden();
-  // Read only while the chat is open and the tab is in view.
-  const seen = chatSeen({ open: chatOpen, hidden: tabHidden });
+  // Read only while the panel is open on the Chat tab and the browser tab is in view.
+  const seen = chatSeen({ open: chatOpen, hidden: tabHidden, tab: sideTab });
+  // A word the other person adds or edits marks the Vocabulary tab until it is looked at.
+  const [vocabNew, setVocabNew] = useState(false);
+  const vocabShown = chatOpen && sideTab === 'vocab';
+  if (vocabShown && vocabNew) setVocabNew(false);
+  const vocab = useVocab(lessonId, member, () => {
+    if (!vocabShown) setVocabNew(true);
+  });
   const [toast, dispatchToast] = useReducer(toastReducer, initialToast);
   const [chatMuted, toggleChatMuted] = useChatMuted();
   const chat = useChat(lessonId, member, (m) => {
@@ -106,16 +120,21 @@ export function RoomShell({
   useTabTitle(seen ? 0 : chat.unread);
   const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
-  // Opening shows everything, and closing counts what arrived while it was open as read.
+  // On the Chat tab, opening shows everything, and closing counts what arrived while it was open as read.
+  // The panel keeps its tab: on the Vocabulary tab the chat stays unread (and its toast stays up).
   const toggleChat = useCallback(() => {
     if (docked) setDockFolded((f) => !f);
     else setOverlayOpen((o) => !o);
+    if (sideTab !== 'chat') return;
     dispatchToast({ type: 'open' });
     markRead();
-  }, [docked, markRead]);
+  }, [docked, markRead, sideTab]);
+  // The toast always leads to the chat, whatever tab the panel was on.
   const openChatFromToast = useCallback(() => {
     if (docked) setDockFolded(false);
     else setOverlayOpen(true);
+    setSideTab('chat');
+    setChatFocusPending(true);
     dispatchToast({ type: 'open' });
     markRead();
   }, [docked, markRead]);
@@ -134,9 +153,9 @@ export function RoomShell({
   }, [seen, dismissToast]);
   const closeChat = useCallback(() => {
     setOverlayOpen(false);
-    markRead();
+    if (sideTab === 'chat') markRead();
     chatButton.current?.focus();
-  }, [markRead]);
+  }, [markRead, sideTab]);
 
   const applyStage = useCallback((next: StageState) => {
     stageRef.current = next;
@@ -281,20 +300,43 @@ export function RoomShell({
   const dockOpen = docked && chatOpen;
   // Keep the fullscreen button clear of the open overlay panel (w-80 + p-2 on each side = 21rem, plus a gap).
   const fsButtonRight = chatOpen && !docked ? 'right-3 sm:right-[21.5rem]' : 'right-3';
+  // One element, shown either docked in the rail or as the overlay. The tab not shown is unmounted:
+  // the messages, the draft and the words live up here, so nothing is lost.
   const chatPanel = (
-    <ChatPanel
+    <SidePanel
       open={chatOpen}
-      onClose={closeChat}
-      messages={chat.messages}
-      send={chat.send}
-      member={member}
-      history={chat.history}
+      docked={docked}
+      tab={sideTab}
+      onTab={setSideTab}
+      chatUnread={seen ? 0 : chat.unread}
+      vocabNew={vocabNew}
       muted={chatMuted}
       onToggleMuted={toggleChatMuted}
-      docked={docked}
-      draft={draft}
-      onDraftChange={setDraft}
-    />
+      onClose={closeChat}
+    >
+      {sideTab === 'chat' ? (
+        <ChatPanel
+          visible={chatOpen}
+          messages={chat.messages}
+          send={chat.send}
+          member={member}
+          history={chat.history}
+          draft={draft}
+          onDraftChange={setDraft}
+          focusInput={chatFocusPending}
+          onInputFocused={() => setChatFocusPending(false)}
+        />
+      ) : (
+        <VocabPanel
+          words={vocab.words}
+          status={vocab.status}
+          member={member}
+          add={vocab.add}
+          update={vocab.update}
+          remove={vocab.remove}
+        />
+      )}
+    </SidePanel>
   );
   const fullscreenButton = (cls: string) => (
     <button

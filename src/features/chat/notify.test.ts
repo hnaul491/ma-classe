@@ -63,4 +63,11 @@ describe('chatSeen', () => {
     expect(chatSeen({ open: false, hidden: false })).toBe(false);
     expect(chatSeen({ open: false, hidden: true })).toBe(false);
   });
+  it('the chat counts as seen only while its tab is the one shown', () => {
+    expect(chatSeen({ open: true, hidden: false, tab: 'chat' })).toBe(true);
+    expect(chatSeen({ open: true, hidden: false, tab: 'vocab' })).toBe(false);
+    expect(chatSeen({ open: true, hidden: true, tab: 'chat' })).toBe(false);
+    expect(chatSeen({ open: false, hidden: false, tab: 'chat' })).toBe(false);
+    expect(chatSeen({ open: true, hidden: false })).toBe(true);
+  });
 });
