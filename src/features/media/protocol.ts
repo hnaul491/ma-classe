@@ -1,4 +1,5 @@
 import { AUDIO_MIMES } from '@/features/drive/limits';
+import type { Role } from '@/lib/lessons/types';
 
 export const MEDIA_TOPIC = 'ma-classe-media';
 
@@ -9,12 +10,13 @@ export type MediaSource =
 /**
  * - `media-load`: someone opened a media (`at`: send time, ms).
  * - `media-state`: the full playback state after an action, and every 5 s while playing.
- *   `position` is in seconds at `sentAt` (ms, sender clock).
+ *   `position` is in seconds at `sentAt` (ms, sender clock). `by` is who acted last: the teacher wins
+ *   a Lamport tie, and only that person sends the heartbeat.
  * - `media-req`: a (re)joining person asks for the current state.
  */
 export type MediaMessage =
   | { t: 'media-load'; source: MediaSource; at: number }
-  | { t: 'media-state'; source: MediaSource | null; playing: boolean; position: number; sentAt: number; lamport: number }
+  | { t: 'media-state'; source: MediaSource | null; playing: boolean; position: number; sentAt: number; lamport: number; by: Role }
   | { t: 'media-req' };
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
@@ -67,8 +69,9 @@ export function decodeMedia(text: string): MediaMessage | null {
         m.position >= 0 &&
         finite(m.sentAt) &&
         Number.isInteger(m.lamport) &&
-        (m.lamport as number) >= 0
-        ? { t: 'media-state', source, playing: m.playing, position: m.position, sentAt: m.sentAt, lamport: m.lamport as number }
+        (m.lamport as number) >= 0 &&
+        (m.by === 'teacher' || m.by === 'student')
+        ? { t: 'media-state', source, playing: m.playing, position: m.position, sentAt: m.sentAt, lamport: m.lamport as number, by: m.by }
         : null;
     }
     case 'media-req':

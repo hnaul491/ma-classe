@@ -5,7 +5,7 @@ import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import { formatElapsed, isOvertime } from './timer';
-import { BoardIcon, CamIcon, ChatIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
+import { BoardIcon, CamIcon, ChatIcon, CamOffIcon, EndIcon, MediaIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
 
 const btn = 'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-blue';
 
@@ -65,6 +65,8 @@ export function ControlBar({
   boardActive,
   onToggleBoard,
   onToggleShare,
+  mediaActive,
+  onToggleMedia,
   chatOpen,
   chatUnread,
   onToggleChat,
@@ -78,6 +80,8 @@ export function ControlBar({
   boardActive: boolean;
   onToggleBoard: () => void;
   onToggleShare: () => void;
+  mediaActive: boolean;
+  onToggleMedia: () => void;
   chatOpen: boolean;
   /** Messages from the other person not seen yet; shows a dot. */
   chatUnread: number;
@@ -128,6 +132,9 @@ export function ControlBar({
       </IconButton>
       <IconButton label={screenSharing ? t('bar.stopShare') : t('bar.share')} active={screenSharing} onClick={onToggleShare}>
         <ShareIcon />
+      </IconButton>
+      <IconButton label={mediaActive ? t('bar.closeMedia') : t('bar.media')} active={mediaActive} onClick={onToggleMedia}>
+        <MediaIcon />
       </IconButton>
       <IconButton label={chatLabel} active={chatOpen} onClick={onToggleChat} ref={chatButtonRef} className="relative">
         <ChatIcon />

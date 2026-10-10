@@ -84,8 +84,8 @@ describe('encodeMedia / decodeMedia', () => {
     const msgs: MediaMessage[] = [
       { t: 'media-load', source: yt, at: 1_700_000_000_000 },
       { t: 'media-load', source: audio, at: 1 },
-      { t: 'media-state', source: yt, playing: true, position: 12.5, sentAt: 1_700_000_000_000, lamport: 3 },
-      { t: 'media-state', source: null, playing: false, position: 0, sentAt: 5, lamport: 0 },
+      { t: 'media-state', source: yt, playing: true, position: 12.5, sentAt: 1_700_000_000_000, lamport: 3, by: 'teacher' },
+      { t: 'media-state', source: null, playing: false, position: 0, sentAt: 5, lamport: 0, by: 'student' },
       { t: 'media-req' },
     ];
     for (const m of msgs) expect(decodeMedia(encodeMedia(m))).toEqual(m);
@@ -103,7 +103,7 @@ describe('encodeMedia / decodeMedia', () => {
     }
   });
 
-  const state = (o: Record<string, unknown>) => JSON.stringify({ v: 1, t: 'media-state', source: yt, playing: true, position: 1, sentAt: 1, lamport: 1, ...o });
+  const state = (o: Record<string, unknown>) => JSON.stringify({ v: 1, t: 'media-state', source: yt, playing: true, position: 1, sentAt: 1, lamport: 1, by: 'student', ...o });
 
   it('rejects a bad YouTube id', () => {
     for (const videoId of ['short', 'dQw4w9WgXcQQ', 'dQw4w9WgX"Q', 42, undefined]) {
@@ -140,6 +140,12 @@ describe('encodeMedia / decodeMedia', () => {
     expect(decodeMedia(state({ lamport: 1.5 }))).toBeNull();
   });
 
+  it('needs who acted (teacher or student), for the tie-break', () => {
+    expect(decodeMedia(state({ by: undefined }))).toBeNull();
+    expect(decodeMedia(state({ by: 'admin' }))).toBeNull();
+    expect(decodeMedia(state({ by: 'teacher' }))).toMatchObject({ by: 'teacher' });
+  });
+
   it('needs a source and a finite time for media-load', () => {
     expect(decodeMedia(JSON.stringify({ v: 1, t: 'media-load', source: null, at: 1 }))).toBeNull();
     expect(decodeMedia(JSON.stringify({ v: 1, t: 'media-load', source: yt }))).toBeNull();
@@ -147,7 +153,7 @@ describe('encodeMedia / decodeMedia', () => {
 
   it('keeps only known fields, drops a non-string title and shortens a long one', () => {
     const extra = decodeMedia(state({ evil: true, source: { ...yt, extra: 1 } }));
-    expect(extra).toEqual({ t: 'media-state', source: yt, playing: true, position: 1, sentAt: 1, lamport: 1 });
+    expect(extra).toEqual({ t: 'media-state', source: yt, playing: true, position: 1, sentAt: 1, lamport: 1, by: 'student' });
     expect(decodeMedia(state({ source: { kind: 'youtube', videoId: ID, title: 5 } }))).toMatchObject({ source: { kind: 'youtube', videoId: ID } });
     const long = decodeMedia(state({ source: { kind: 'youtube', videoId: ID, title: 'x'.repeat(1000) } }));
     expect(long?.t === 'media-state' && long.source?.kind === 'youtube' && long.source.title?.length).toBe(200);

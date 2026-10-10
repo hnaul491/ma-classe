@@ -16,6 +16,19 @@ export class DriveExportTooLarge extends Error {
   }
 }
 
+/**
+ * Drive answered a download with an error status. 403 and 404 mostly mean the file is not shared
+ * with this Google account (the other person's file, played on the media stage).
+ */
+export class DriveHttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`Drive download failed (${status})`);
+    this.name = 'DriveHttpError';
+    this.status = status;
+  }
+}
+
 export type DriveFetchDeps = {
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   getToken: () => Promise<string>;
@@ -95,7 +108,7 @@ export async function downloadDriveFile(f: DriveFile, fetchDrive: DriveFetch = d
   const res = await fetchDrive(exporting ? `files/${id}/export?mimeType=application%2Fpdf` : `files/${id}?alt=media&supportsAllDrives=true`);
   if (!res.ok) {
     if (exporting && res.status === 403 && (await driveErrorReason(res)) === 'exportSizeLimitExceeded') throw new DriveExportTooLarge();
-    throw new Error(`Drive download failed (${res.status})`);
+    throw new DriveHttpError(res.status);
   }
   const blob = await res.blob();
   if (!exporting) return new File([blob], f.name, { type: f.mimeType });

@@ -1,0 +1,143 @@
+// Pure playback rules for the media stage: what is an echo, who sends the heartbeat, what to do to the
+// player for a state, when autoplay counts as blocked, and what is a seek. No React, no browser.
+
+import type { Role } from '@/lib/lessons/types';
+import type { MediaMessage } from './protocol';
+import { needsCorrection, targetPosition, type MediaState } from './sync';
+
+/** Player events this soon after applying a remote state are its echo, not the person's action. */
+export const ECHO_GUARD_MS = 500;
+
+/**
+ * The "applying" flag. `begin()` opens a 500 ms window (a seek, a pause). `hold()` keeps it open until
+ * the returned release is called (a play that may take a while), then leaves the same 500 ms tail.
+ */
+export function createEchoGuard(now: () => number = Date.now) {
+  let until = 0;
+  let holds = 0;
+  const begin = () => {
+    until = Math.max(until, now() + ECHO_GUARD_MS);
+  };
+  return {
+    begin,
+    hold(): () => void {
+      holds += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        holds -= 1;
+        begin();
+      };
+    },
+    active: (): boolean => holds > 0 || now() < until,
+  };
+}
+
+export type Observed = { playing: boolean; position: number };
+
+/**
+ * True when a player event differs from the shared state: play/pause flipped, or the position is
+ * beyond the drift threshold from where playback should be. An event that matches is an echo (e.g. a
+ * PLAYING that arrives after the 500 ms window, once a remote seek finished buffering).
+ */
+export function isLocalChange(state: MediaState, observed: Observed, now: number): boolean {
+  if (!state.source) return false;
+  if (observed.playing !== state.playing) return true;
+  return needsCorrection(observed.position, targetPosition(state, now));
+}
+
+/** While playing, only the person who acted last re-sends the state. */
+export function shouldHeartbeat(state: MediaState, role: Role): boolean {
+  return state.source !== null && state.playing && state.by === role;
+}
+
+/**
+ * The state to send now, as a heartbeat or as a reply to `media-req`: the same Lamport counter and
+ * author, at the player's position (or, without a player, where playback should be). Null before
+ * anyone acted.
+ */
+export function stateMessage(state: MediaState, position: number | null, now: number): Extract<MediaMessage, { t: 'media-state' }> | null {
+  if (state.by === null || state.lamport === 0) return null;
+  const at = position ?? targetPosition(state, now);
+  return { t: 'media-state', source: state.source, playing: state.playing, position: Math.max(0, at), sentAt: now, lamport: state.lamport, by: state.by };
+}
+
+export type ApplyPlan = { seekTo: number | null; play: boolean; pause: boolean };
+
+/** What to do to the local player so it matches `state`. */
+export function applyPlan(state: MediaState, local: Observed, now: number): ApplyPlan {
+  const target = targetPosition(state, now);
+  return {
+    seekTo: needsCorrection(local.position, target) ? target : null,
+    play: state.playing && !local.playing,
+    pause: !state.playing && local.playing,
+  };
+}
+
+/** `YT.PlayerState` values. */
+export const YT_UNSTARTED = -1;
+export const YT_ENDED = 0;
+export const YT_PLAYING = 1;
+export const YT_PAUSED = 2;
+export const YT_BUFFERING = 3;
+export const YT_CUED = 5;
+
+/** `playVideo()` that has not reached PLAYING by then was blocked by the browser's autoplay rule. */
+export const AUTOPLAY_TIMEOUT_MS = 1500;
+/** Still buffering (slow connection) gets this long in all. */
+export const AUTOPLAY_MAX_WAIT_MS = 5000;
+
+/** After `playVideo()`: playing, keep waiting, or blocked ("Click to play"). */
+export function autoplayVerdict(playerState: number, elapsedMs: number): 'playing' | 'wait' | 'blocked' {
+  if (playerState === YT_PLAYING) return 'playing';
+  const limit = playerState === YT_BUFFERING ? AUTOPLAY_MAX_WAIT_MS : AUTOPLAY_TIMEOUT_MS;
+  return elapsedMs >= limit ? 'blocked' : 'wait';
+}
+
+/** The YouTube player has no seek event: its time is sampled this often. */
+export const SEEK_POLL_MS = 500;
+/** A jump larger than this from where the video should be is a seek. */
+export const SEEK_JUMP_S = 1;
+/** Samples further apart than this (a throttled background tab) only reset the baseline. */
+export const SEEK_MAX_GAP_MS = 2000;
+
+export type Sample = { at: number; position: number; playing: boolean };
+
+/** True when the time moved by more than the threshold away from where the previous sample predicts. */
+export function isSeekJump(prev: Sample, cur: Sample, thresholdSec = SEEK_JUMP_S): boolean {
+  const gap = cur.at - prev.at;
+  if (gap <= 0 || gap > SEEK_MAX_GAP_MS) return false;
+  const expected = prev.position + (prev.playing ? gap / 1000 : 0);
+  return Math.abs(cur.position - expected) > thresholdSec;
+}
+
+/** A YouTube state change as a play or pause, or null for states that are not an action. */
+export function ytObserved(playerState: number, position: number): Observed | null {
+  if (playerState === YT_PLAYING) return { playing: true, position };
+  if (playerState === YT_PAUSED || playerState === YT_ENDED) return { playing: false, position };
+  return null;
+}
+
+/** A YouTube time sample for seek detection, or null while buffering (a stall is not a seek). */
+export function ytSample(playerState: number, position: number, at: number): Sample | null {
+  if (playerState === YT_BUFFERING) return null;
+  return { at, position, playing: playerState === YT_PLAYING };
+}
+
+/** True when `audio.play()` was refused by the browser's autoplay rule (not interrupted by a pause). */
+export function isAutoplayRejection(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'NotAllowedError';
+}
+
+/** What the media stage needs from a player (YouTube or audio). */
+export type PlayerControl = {
+  /** Seconds. */
+  position(): number;
+  /** Playing, or about to (buffering). */
+  playing(): boolean;
+  /** Resolves false when the browser blocked it (autoplay): show "Click to play". */
+  play(): Promise<boolean>;
+  pause(): void;
+  seek(seconds: number): void;
+};

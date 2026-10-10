@@ -6,6 +6,7 @@ import {
   DRIVE_API,
   DriveExportTooLarge,
   driveErrorKey,
+  DriveHttpError,
   driveErrorReason,
   DriveReauthRequired,
   pickedFile,
@@ -91,6 +92,7 @@ describe('driveErrorKey', () => {
     expect(driveErrorKey(new DriveAuthError('no_scope'))).toBe('drive.authCancelled');
     expect(driveErrorKey(new DriveExportTooLarge())).toBe('drive.exportTooLarge');
     expect(driveErrorKey(new Error('Drive download failed (500)'))).toBe('drive.failed');
+    expect(driveErrorKey(new DriveHttpError(404))).toBe('drive.failed');
     expect(driveErrorKey('boom')).toBe('drive.failed');
   });
 });
@@ -140,11 +142,28 @@ describe('downloadDriveFile', () => {
     await expect(downloadDriveFile(slides, fetch)).rejects.toBeInstanceOf(DriveExportTooLarge);
   });
 
-  it('throws a plain error for other failures', async () => {
-    const fetch = vi.fn(async () => new Response('{}', { status: 404 }));
-    const err = await downloadDriveFile(pdf, fetch).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(Error);
-    expect(err).not.toBeInstanceOf(DriveExportTooLarge);
+  it('throws a DriveHttpError with the status for other failures', async () => {
+    for (const status of [403, 404, 500]) {
+      const fetch = vi.fn(async () => new Response('{}', { status }));
+      const err = await downloadDriveFile(pdf, fetch).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DriveHttpError);
+      expect(err).not.toBeInstanceOf(DriveExportTooLarge);
+      expect((err as DriveHttpError).status).toBe(status);
+    }
+  });
+
+  it('a 403 on an export that is not the size limit is a DriveHttpError too', async () => {
+    const fetch = vi.fn(async () => new Response('{"error":{"errors":[{"reason":"forbidden"}]}}', { status: 403 }));
+    const err = await downloadDriveFile(slides, fetch).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DriveHttpError);
+    expect((err as DriveHttpError).status).toBe(403);
+  });
+
+  it('downloads audio as is, for the media stage', async () => {
+    const fetch = vi.fn(async () => new Response(new Uint8Array([1, 2])));
+    const f = await downloadDriveFile({ id: 'a1', name: 'dialogue.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch);
+    expect(fetch.mock.calls[0]).toEqual(['files/a1?alt=media&supportsAllDrives=true']);
+    expect(f.type).toBe('audio/mpeg');
   });
 
   it('refuses a file it cannot handle, without fetching', async () => {

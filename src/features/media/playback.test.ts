@@ -1,0 +1,252 @@
+import { describe, expect, it } from 'vitest';
+import {
+  applyPlan,
+  AUTOPLAY_MAX_WAIT_MS,
+  AUTOPLAY_TIMEOUT_MS,
+  autoplayVerdict,
+  createEchoGuard,
+  ECHO_GUARD_MS,
+  isAutoplayRejection,
+  isLocalChange,
+  isSeekJump,
+  SEEK_JUMP_S,
+  SEEK_MAX_GAP_MS,
+  shouldHeartbeat,
+  stateMessage,
+  YT_BUFFERING,
+  YT_CUED,
+  YT_ENDED,
+  YT_PAUSED,
+  YT_PLAYING,
+  YT_UNSTARTED,
+  ytObserved,
+  ytSample,
+} from './playback';
+import type { MediaSource } from './protocol';
+import { HEARTBEAT_MS, type MediaState } from './sync';
+
+const yt: MediaSource = { kind: 'youtube', videoId: 'dQw4w9WgXcQ' };
+const playing: MediaState = { source: yt, playing: true, position: 10, sentAt: 1000, lamport: 3, by: 'teacher' };
+const paused: MediaState = { ...playing, playing: false };
+
+function clock(start = 0) {
+  let t = start;
+  return { now: () => t, advance: (ms: number) => (t += ms) };
+}
+
+describe('createEchoGuard', () => {
+  it('ignores player events for 500 ms after applying a remote state', () => {
+    const c = clock();
+    const g = createEchoGuard(c.now);
+    expect(g.active()).toBe(false);
+    g.begin();
+    expect(g.active()).toBe(true);
+    c.advance(ECHO_GUARD_MS - 1);
+    expect(g.active()).toBe(true);
+    c.advance(1);
+    expect(g.active()).toBe(false);
+    expect(ECHO_GUARD_MS).toBe(500);
+  });
+
+  it('a new apply extends the window', () => {
+    const c = clock();
+    const g = createEchoGuard(c.now);
+    g.begin();
+    c.advance(400);
+    g.begin();
+    c.advance(400);
+    expect(g.active()).toBe(true);
+  });
+
+  it('holds while a play is pending, then keeps a 500 ms tail after release', () => {
+    const c = clock();
+    const g = createEchoGuard(c.now);
+    const release = g.hold();
+    c.advance(10_000);
+    expect(g.active()).toBe(true);
+    release();
+    expect(g.active()).toBe(true);
+    c.advance(ECHO_GUARD_MS);
+    expect(g.active()).toBe(false);
+  });
+
+  it('releasing twice counts once; two holds need two releases', () => {
+    const c = clock();
+    const g = createEchoGuard(c.now);
+    const a = g.hold();
+    const b = g.hold();
+    a();
+    a();
+    c.advance(ECHO_GUARD_MS);
+    expect(g.active()).toBe(true);
+    b();
+    c.advance(ECHO_GUARD_MS);
+    expect(g.active()).toBe(false);
+  });
+});
+
+describe('isLocalChange', () => {
+  it('a pause while playing, or a play while paused, is a change', () => {
+    expect(isLocalChange(playing, { playing: false, position: 10 }, 1000)).toBe(true);
+    expect(isLocalChange(paused, { playing: true, position: 10 }, 1000)).toBe(true);
+  });
+
+  it('a seek beyond the drift threshold is a change', () => {
+    expect(isLocalChange(paused, { playing: false, position: 40 }, 1000)).toBe(true);
+    // Playing: the target moves on with time (10 s + 5 s), so 15 s is where it should be.
+    expect(isLocalChange(playing, { playing: true, position: 15 }, 6000)).toBe(false);
+    expect(isLocalChange(playing, { playing: true, position: 10 }, 6000)).toBe(true);
+  });
+
+  it('an event that matches the shared state is an echo, not a change (a late PLAYING after buffering)', () => {
+    expect(isLocalChange(playing, { playing: true, position: 10.4 }, 1000)).toBe(false);
+    expect(isLocalChange(paused, { playing: false, position: 10 }, 99_000)).toBe(false);
+  });
+
+  it('nothing is a change while no media is loaded', () => {
+    expect(isLocalChange({ ...playing, source: null }, { playing: false, position: 0 }, 1000)).toBe(false);
+  });
+});
+
+describe('shouldHeartbeat', () => {
+  it('only the person who acted last sends it, and only while playing', () => {
+    expect(shouldHeartbeat(playing, 'teacher')).toBe(true);
+    expect(shouldHeartbeat(playing, 'student')).toBe(false);
+    expect(shouldHeartbeat(paused, 'teacher')).toBe(false);
+    expect(shouldHeartbeat({ ...playing, source: null }, 'teacher')).toBe(false);
+    expect(HEARTBEAT_MS).toBe(5000);
+  });
+});
+
+describe('stateMessage', () => {
+  it('is the state at the player’s position now, keeping the lamport and who acted (heartbeat and reply)', () => {
+    expect(stateMessage(playing, 42.5, 9000)).toEqual({
+      t: 'media-state',
+      source: yt,
+      playing: true,
+      position: 42.5,
+      sentAt: 9000,
+      lamport: 3,
+      by: 'teacher',
+    });
+  });
+
+  it('without a player, uses where playback should be', () => {
+    expect(stateMessage(playing, null, 3000)?.position).toBeCloseTo(12);
+    expect(stateMessage(paused, null, 3000)?.position).toBe(10);
+  });
+
+  it('never sends a negative position', () => {
+    expect(stateMessage(playing, -0.2, 3000)?.position).toBe(0);
+  });
+
+  it('is null before anyone acted: nothing to hand over', () => {
+    expect(stateMessage({ source: null, playing: false, position: 0, sentAt: 0, lamport: 0, by: null }, null, 1)).toBeNull();
+  });
+
+  it('hands over a closed media too (source null), so a reload does not reopen it', () => {
+    expect(stateMessage({ source: null, playing: false, position: 0, sentAt: 5, lamport: 4, by: 'student' }, null, 9)).toMatchObject({
+      source: null,
+      lamport: 4,
+    });
+  });
+});
+
+describe('applyPlan', () => {
+  it('seeks only beyond the drift threshold', () => {
+    expect(applyPlan(paused, { position: 10.5, playing: false }, 5000)).toEqual({ seekTo: null, play: false, pause: false });
+    expect(applyPlan(paused, { position: 30, playing: false }, 5000)).toEqual({ seekTo: 10, play: false, pause: false });
+  });
+
+  it('plays from where the other person is now (a reload mid-video)', () => {
+    const plan = applyPlan({ ...playing, position: 120, sentAt: 5000 }, { position: 0, playing: false }, 5250);
+    expect(plan.play).toBe(true);
+    expect(plan.pause).toBe(false);
+    expect(plan.seekTo).toBeCloseTo(120.25);
+  });
+
+  it('pauses a playing player for a paused state', () => {
+    expect(applyPlan(paused, { position: 10, playing: true }, 1000)).toEqual({ seekTo: null, play: false, pause: true });
+  });
+
+  it('does nothing when the player already matches', () => {
+    expect(applyPlan(playing, { position: 12.2, playing: true }, 3000)).toEqual({ seekTo: null, play: false, pause: false });
+  });
+});
+
+describe('autoplayVerdict', () => {
+  it('playing as soon as the player reports PLAYING', () => {
+    expect(autoplayVerdict(YT_PLAYING, 100)).toBe('playing');
+    expect(autoplayVerdict(YT_PLAYING, 9000)).toBe('playing');
+  });
+
+  it('blocked when PLAYING is not reached within 1.5 s', () => {
+    expect(AUTOPLAY_TIMEOUT_MS).toBe(1500);
+    for (const s of [YT_UNSTARTED, YT_PAUSED, YT_CUED, YT_ENDED]) {
+      expect(autoplayVerdict(s, AUTOPLAY_TIMEOUT_MS - 1)).toBe('wait');
+      expect(autoplayVerdict(s, AUTOPLAY_TIMEOUT_MS)).toBe('blocked');
+    }
+  });
+
+  it('a slow connection still buffering gets more time, up to a limit', () => {
+    expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_TIMEOUT_MS)).toBe('wait');
+    expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_MAX_WAIT_MS - 1)).toBe('wait');
+    expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_MAX_WAIT_MS)).toBe('blocked');
+  });
+});
+
+describe('isSeekJump', () => {
+  it('a playing video moving with the clock is not a seek', () => {
+    expect(isSeekJump({ at: 0, position: 10, playing: true }, { at: 500, position: 10.5, playing: true })).toBe(false);
+  });
+
+  it('a jump beyond the threshold is a seek, forward or back, playing or paused', () => {
+    expect(SEEK_JUMP_S).toBe(1);
+    expect(isSeekJump({ at: 0, position: 10, playing: true }, { at: 500, position: 40, playing: true })).toBe(true);
+    expect(isSeekJump({ at: 0, position: 40, playing: true }, { at: 500, position: 5, playing: true })).toBe(true);
+    expect(isSeekJump({ at: 0, position: 10, playing: false }, { at: 500, position: 11.2, playing: false })).toBe(true);
+    expect(isSeekJump({ at: 0, position: 10, playing: false }, { at: 500, position: 10.9, playing: false })).toBe(false);
+  });
+
+  it('a buffering stall or a play started between samples is not a seek', () => {
+    expect(isSeekJump({ at: 0, position: 10, playing: true }, { at: 500, position: 10, playing: true })).toBe(false);
+    expect(isSeekJump({ at: 0, position: 10, playing: false }, { at: 500, position: 10.4, playing: true })).toBe(false);
+  });
+
+  it('after a long gap (a throttled background tab) it only resets the baseline', () => {
+    expect(isSeekJump({ at: 0, position: 10, playing: true }, { at: SEEK_MAX_GAP_MS + 1, position: 60, playing: true })).toBe(false);
+    expect(isSeekJump({ at: 500, position: 10, playing: true }, { at: 500, position: 60, playing: true })).toBe(false);
+  });
+});
+
+describe('ytObserved', () => {
+  it('PLAYING is a play, PAUSED and ENDED are a pause, the rest is not an action', () => {
+    expect(ytObserved(YT_PLAYING, 3)).toEqual({ playing: true, position: 3 });
+    expect(ytObserved(YT_PAUSED, 4)).toEqual({ playing: false, position: 4 });
+    expect(ytObserved(YT_ENDED, 5)).toEqual({ playing: false, position: 5 });
+    expect(ytObserved(YT_BUFFERING, 6)).toBeNull();
+    expect(ytObserved(YT_CUED, 0)).toBeNull();
+    expect(ytObserved(YT_UNSTARTED, 0)).toBeNull();
+  });
+});
+
+describe('ytSample', () => {
+  it('samples the time while playing or paused', () => {
+    expect(ytSample(YT_PLAYING, 12, 500)).toEqual({ at: 500, position: 12, playing: true });
+    expect(ytSample(YT_PAUSED, 12, 500)).toEqual({ at: 500, position: 12, playing: false });
+  });
+
+  it('is null while buffering, so a stall never looks like a seek (the PLAYING after it reports a seek)', () => {
+    expect(ytSample(YT_BUFFERING, 12, 500)).toBeNull();
+  });
+});
+
+describe('isAutoplayRejection', () => {
+  it('only NotAllowedError means the browser blocked play()', () => {
+    expect(isAutoplayRejection(new DOMException('blocked', 'NotAllowedError'))).toBe(true);
+    // A pause() that interrupts play() rejects with AbortError: not blocked.
+    expect(isAutoplayRejection(new DOMException('interrupted', 'AbortError'))).toBe(false);
+    expect(isAutoplayRejection(new Error('x'))).toBe(false);
+    expect(isAutoplayRejection(undefined)).toBe(false);
+  });
+});

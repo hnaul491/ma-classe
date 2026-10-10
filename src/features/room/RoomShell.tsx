@@ -14,7 +14,9 @@ import { playDing, useAudioUnlock, useChatMuted } from '@/features/chat/sound';
 import { useChat } from '@/features/chat/useChat';
 import { useTabHidden } from '@/features/chat/useTabHidden';
 import { useTabTitle } from '@/features/chat/useTabTitle';
+import type { DriveFile } from '@/features/drive/classify';
 import type { BoardHandle } from '@/features/stage/Board';
+import type { MediaHandle } from '@/features/stage/MediaStage';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
 import { useT } from '@/lib/i18n/client';
@@ -43,12 +45,12 @@ import { useMediaQuery } from './useMediaQuery';
 import { useToast } from './useToast';
 
 const Board = dynamic(() => import('@/features/stage/Board'), { ssr: false });
+const MediaStage = dynamic(() => import('@/features/stage/MediaStage'), { ssr: false });
 
 /** End lesson waits this long for the board to save, then ends anyway. */
 const END_FLUSH_TIMEOUT_MS = 4000;
 
-/** Stage modules built so far. Plan 3 adds 'media'. */
-const AVAILABLE: readonly Stage[] = ['cameras', 'board', 'screen'];
+const AVAILABLE: readonly Stage[] = ['cameras', 'board', 'screen', 'media'];
 const STAGE_KEY: Record<Stage, MessageKey> = {
   cameras: 'stage.cameras',
   board: 'stage.board',
@@ -75,12 +77,13 @@ export function RoomShell({
   const stageRef = useRef(stage);
   const { message: toastMessage, show: showToast } = useToast();
   const board = useRef<BoardHandle | null>(null);
+  const media = useRef<MediaHandle | null>(null);
   const visible = resolveVisibleStage(stage.stage, { screenActive: screenTracks.length > 0, available: AVAILABLE });
   const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>(fullscreenKeyEnabled(visible));
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
   // Personal: each person opens and closes their own chat; it is not synced.
-  // On board and screen stages (outside fullscreen, from lg up) the chat is docked under the cameras and
+  // On board, screen and media stages (outside fullscreen, from lg up) the chat is docked under the cameras and
   // open by default; the Chat button folds it. Elsewhere it is the overlay panel, closed by default.
   const wide = useMediaQuery('(min-width: 1024px)');
   const railShown = visible !== 'cameras' && !fsActive;
@@ -223,6 +226,20 @@ export function RoomShell({
   const showBoard = useCallback(() => {
     if (stageRef.current.stage !== 'board') changeStage('board');
   }, [changeStage]);
+  const toggleMedia = useCallback(() => {
+    changeStage(stageRef.current.stage === 'media' ? 'cameras' : 'media');
+  }, [changeStage]);
+  const closeMedia = useCallback(() => changeStage('cameras'), [changeStage]);
+  // An audio file picked on the board's Drive menu plays on the media stage.
+  const openMedia = useCallback(
+    (m: { kind: 'audio'; drive: DriveFile }) => {
+      const handle = media.current;
+      if (!handle) return showToast(t('media.failed'));
+      if (stageRef.current.stage !== 'media') changeStage('media');
+      handle.openAudio(m.drive);
+    },
+    [changeStage, showToast, t],
+  );
 
   const onEnd = useCallback(async () => {
     // Save the board first (a few seconds at most): the last strokes must reach storage.
@@ -260,7 +277,7 @@ export function RoomShell({
     };
   }, [room, showToast, t]);
 
-  // The camera rail (w-44) is shown on board and screen stages outside fullscreen.
+  // The camera rail (w-44) is shown on board, screen and media stages outside fullscreen.
   const dockOpen = docked && chatOpen;
   // Keep the fullscreen button clear of the open overlay panel (w-80 + p-2 on each side = 21rem, plus a gap).
   const fsButtonRight = chatOpen && !docked ? 'right-3 sm:right-[21.5rem]' : 'right-3';
@@ -298,6 +315,8 @@ export function RoomShell({
       boardActive={visible === 'board'}
       onToggleBoard={toggleBoard}
       onToggleShare={() => void toggleShare()}
+      mediaActive={visible === 'media'}
+      onToggleMedia={toggleMedia}
       chatOpen={chatOpen}
       chatUnread={seen ? 0 : chat.unread}
       onToggleChat={toggleChat}
@@ -325,7 +344,12 @@ export function RoomShell({
               onError={(k) => showToast(t(k))}
               onShow={showBoard}
               flushRef={board}
+              onOpenMedia={openMedia}
             />
+          </div>
+          {/* Mounted on every stage, like the board: the media and its sync survive stage changes. */}
+          <div className={visible === 'media' ? 'h-full' : 'hidden'}>
+            <MediaStage member={member} onError={(k) => showToast(t(k))} onClose={closeMedia} handleRef={media} />
           </div>
           {visible === 'screen' && <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />}
         </main>

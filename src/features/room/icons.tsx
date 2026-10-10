@@ -101,3 +101,10 @@ export const CloseIcon = () => (
     <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
   </svg>
 );
+
+export const MediaIcon = () => (
+  <svg {...stroke}>
+    <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+    <path d="M6.5 5.5v5l4-2.5z" />
+  </svg>
+);
