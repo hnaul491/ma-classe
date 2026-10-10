@@ -34,10 +34,19 @@ export function Modal({
     if (!dialog) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.open) dialog.showModal();
-    const onCloseEvent = () => closed();
+    // The page behind must not scroll while the dialog is open.
+    const html = document.documentElement;
+    const overflow = html.style.overflow;
+    html.style.overflow = 'hidden';
+    const onCloseEvent = () => {
+      // Under StrictMode the cleanup's close() queues a 'close' event that lands after the dialog reopened.
+      if (dialog.open) return;
+      closed();
+    };
     dialog.addEventListener('close', onCloseEvent);
     return () => {
       dialog.removeEventListener('close', onCloseEvent);
+      html.style.overflow = overflow;
       if (dialog.open) dialog.close();
       const target = focusTarget() ?? previous;
       if (target?.isConnected) target.focus();
@@ -64,7 +73,7 @@ export function Modal({
           {t('common.close')}
         </button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
     </dialog>
   );
 }

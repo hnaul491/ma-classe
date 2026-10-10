@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkUpload, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError } from './upload';
+import { checkUpload, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError, shouldRetryWithoutDocumentColumns } from './upload';
 
 describe('checkUpload', () => {
   it('accepts PDFs and PNG/JPG/WebP images', () => {
@@ -36,18 +36,40 @@ describe('isLessonPath', () => {
   });
 });
 
+const F1 = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
+const F2 = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
 describe('isFilePathFor', () => {
   it('accepts the path an upload gives this file, in any lesson folder', () => {
-    expect(isFilePathFor('F1', 'L1/F1.webp')).toBe(true);
-    expect(isFilePathFor('F1', 'L2/F1.webp')).toBe(true);
+    expect(isFilePathFor(F1, `L1/${F1}.webp`)).toBe(true);
+    expect(isFilePathFor(F1, `L2/${F1}.webp`)).toBe(true);
   });
 
   it('rejects other files, nested or relative paths', () => {
-    expect(isFilePathFor('F1', 'L1/F2.webp')).toBe(false);
-    expect(isFilePathFor('F1', 'F1.webp')).toBe(false);
-    expect(isFilePathFor('F1', '/F1.webp')).toBe(false);
-    expect(isFilePathFor('F1', '../F1.webp')).toBe(false);
-    expect(isFilePathFor('F1', 'L1/x/F1.webp')).toBe(false);
-    expect(isFilePathFor('F1', 'L1/F1.png')).toBe(false);
+    expect(isFilePathFor(F1, `L1/${F2}.webp`)).toBe(false);
+    expect(isFilePathFor(F1, `${F1}.webp`)).toBe(false);
+    expect(isFilePathFor(F1, `/${F1}.webp`)).toBe(false);
+    expect(isFilePathFor(F1, `../${F1}.webp`)).toBe(false);
+    expect(isFilePathFor(F1, `L1/x/${F1}.webp`)).toBe(false);
+    expect(isFilePathFor(F1, `L1/${F1}.png`)).toBe(false);
+  });
+
+  it('requires a uuid file id (Excalidraw SHA-1 ids are never stored)', () => {
+    expect(isFilePathFor('F1', 'L1/F1.webp')).toBe(false);
+    expect(isFilePathFor('a94a8fe5ccb19ba61c4c0873d391e987982fbbd3', 'L1/a94a8fe5ccb19ba61c4c0873d391e987982fbbd3.webp')).toBe(false);
+  });
+});
+
+describe('shouldRetryWithoutDocumentColumns', () => {
+  it('retries when the document columns do not exist yet (migration 0004 not run)', () => {
+    expect(shouldRetryWithoutDocumentColumns({ code: 'PGRST204' })).toBe(true);
+    expect(shouldRetryWithoutDocumentColumns({ code: '42703' })).toBe(true);
+  });
+
+  it('does not retry other errors or no error', () => {
+    expect(shouldRetryWithoutDocumentColumns({ code: '42501' })).toBe(false);
+    expect(shouldRetryWithoutDocumentColumns({ code: '23505' })).toBe(false);
+    expect(shouldRetryWithoutDocumentColumns(null)).toBe(false);
+    expect(shouldRetryWithoutDocumentColumns({})).toBe(false);
   });
 });

@@ -5,7 +5,8 @@ import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Wordmark } from '@/components/Wordmark';
 import { DocumentsBrowser } from '@/features/documents/DocumentsBrowser';
-import { FILE_ROW_COLUMNS, groupDocuments, type FileRow } from '@/features/documents/group';
+import { groupDocuments } from '@/features/documents/group';
+import { loadFileRows } from '@/features/documents/load';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
 import { getLocale, getT, getThemePref, getTimeZone } from '@/lib/i18n/server';
@@ -23,15 +24,11 @@ export default async function DocumentsPage() {
   if (!member) redirect('/login?denied=1');
 
   const supabase = await createClient();
-  const [files, lessons] = await Promise.all([
-    supabase.from('files').select(FILE_ROW_COLUMNS),
-    supabase.from('lessons').select('id, started_at, status'),
-  ]);
-  // An outage goes to the error page, not to an empty library.
-  if (files.error) throw new Error('Could not load the documents', { cause: files.error });
+  // An outage goes to the error page, not to an empty library (loadFileRows throws too).
+  const [files, lessons] = await Promise.all([loadFileRows(supabase), supabase.from('lessons').select('id, started_at, status')]);
   if (lessons.error) throw new Error('Could not load the lessons', { cause: lessons.error });
 
-  const docs = groupDocuments((files.data ?? []) as FileRow[]);
+  const docs = groupDocuments(files);
   const thumbs: Record<string, string> = {};
   const firstPages = docs.map((d) => d.pages[0].storage_path);
   if (firstPages.length > 0) {

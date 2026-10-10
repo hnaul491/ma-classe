@@ -114,7 +114,7 @@
   }
 
   /* Tailwind v4 resets buttons to the default arrow cursor; anything clickable shows a hand. */
-  button:not(:disabled),
+  button:not(:disabled, [aria-disabled="true"]),
   [role="button"]:not([aria-disabled="true"]),
   select:not(:disabled),
   summary,
@@ -124,6 +124,7 @@
   }
 
   button:disabled,
+  button[aria-disabled="true"],
   select:disabled,
   input:disabled {
     cursor: not-allowed;
@@ -159,7 +160,8 @@
       border-color 120ms ease,
       color 120ms ease;
   }
-  .btn:disabled {
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
     opacity: 0.6;
   }
 
@@ -167,7 +169,7 @@
     background: var(--blue);
     color: var(--surface);
   }
-  .btn-primary:not(:disabled):hover {
+  .btn-primary:not(:disabled, [aria-disabled="true"]):hover {
     background: color-mix(in srgb, var(--blue) 86%, var(--ink));
   }
 
@@ -176,7 +178,7 @@
     color: var(--ink);
     border: 1px solid var(--line);
   }
-  .btn-secondary:not(:disabled):hover {
+  .btn-secondary:not(:disabled, [aria-disabled="true"]):hover {
     background: var(--surface-2);
   }
 

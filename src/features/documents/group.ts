@@ -31,3 +31,19 @@ export function filterDocuments(docs: readonly DocumentGroup[], query: string): 
   const q = fold(query.trim());
   return q ? docs.filter((d) => fold(d.name).includes(q)) : [...docs];
 }
+
+/** The `files` columns before migration 0004 (no document grouping yet). */
+export const LEGACY_FILE_ROW_COLUMNS = 'id, lesson_id, storage_path, kind, width, height, name, created_at';
+
+/** A row read with LEGACY_FILE_ROW_COLUMNS: each file is its own document. */
+export function legacyFileRow(r: Omit<FileRow, 'document_id' | 'page_index'>): FileRow {
+  return { ...r, document_id: null, page_index: 0 };
+}
+
+/**
+ * True when a query failed only because the document columns (migration 0004) do not exist yet:
+ * PostgREST answers PGRST204 for an unknown column on insert, Postgres 42703 on select.
+ */
+export function shouldRetryWithoutDocumentColumns(error: { code?: string } | null): boolean {
+  return error?.code === 'PGRST204' || error?.code === '42703';
+}

@@ -5,20 +5,17 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatLessonDate, type Locale } from '@/lib/i18n/messages';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import { DocumentsBrowser } from './DocumentsBrowser';
-import { FILE_ROW_COLUMNS, groupDocuments, type DocumentGroup, type FileRow } from './group';
+import { groupDocuments, type DocumentGroup } from './group';
+import { loadFileRows } from './load';
 import { Modal } from './Modal';
 
 type Library = { docs: DocumentGroup[]; thumbs: Record<string, string>; lessonDates: Record<string, string> };
 
 async function loadLibrary(locale: Locale): Promise<Library> {
   const supabase = createBrowserSupabase();
-  const [files, lessons] = await Promise.all([
-    supabase.from('files').select(FILE_ROW_COLUMNS),
-    supabase.from('lessons').select('id, started_at'),
-  ]);
-  if (files.error) throw new Error('Could not load the documents', { cause: files.error });
+  const [files, lessons] = await Promise.all([loadFileRows(supabase), supabase.from('lessons').select('id, started_at')]);
   if (lessons.error) throw new Error('Could not load the lessons', { cause: lessons.error });
-  const docs = groupDocuments((files.data ?? []) as FileRow[]);
+  const docs = groupDocuments(files);
   const thumbs: Record<string, string> = {};
   const firstPages = docs.map((d) => d.pages[0].storage_path);
   if (firstPages.length > 0) {

@@ -3,6 +3,7 @@
 import '@excalidraw/excalidraw/index.css';
 import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, reconcileElements, restoreElements } from '@excalidraw/excalidraw';
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile';
+import type { ClipboardData } from '@excalidraw/excalidraw/clipboard';
 import type { ExcalidrawElement, FileId, OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
 import { useRoomContext } from '@livekit/components-react';
@@ -10,7 +11,7 @@ import { RoomEvent, type RemoteParticipant } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useId, useReducer, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
 import { parseBackup, shouldWriteBackup } from '@/features/board/backup';
-import { sceneFileIds } from '@/features/board/files';
+import { droppedFile, hasUnstoredImages, sceneFileIds } from '@/features/board/files';
 import { backupKey, loadBoard, loadDocumentFiles, loadFiles, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
@@ -22,6 +23,7 @@ import type { FileRow } from '@/features/documents/group';
 import { addParam } from '@/features/documents/params';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
 import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
+import { isTypingElement } from '@/features/room/keys';
 import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, viewportFor } from '@/features/board/view';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
@@ -601,6 +603,61 @@ export default function Board({
     }
   }
 
+  // Pasted and dropped files go through our upload, so they are stored and reach the other person.
+  // Excalidraw's own image tool is off (UIOptions.tools.image), and in 0.18.1 it handles a pasted image
+  // file before calling onPaste, so files are caught here, in the capture phase, before it sees them.
+  const onIncomingFile = useEffectEvent((file: File) => {
+    if (progress === null) void onFile(file);
+  });
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const file = droppedFile(e.dataTransfer?.files);
+      if (file) onIncomingFile(file);
+    };
+    const onPasteCapture = (e: ClipboardEvent) => {
+      // Same target rule as Excalidraw: the board has focus and no text field is being edited.
+      const active = document.activeElement;
+      if (!root.contains(active) || isTypingElement(active as HTMLElement | null)) return;
+      const file = droppedFile(e.clipboardData?.files);
+      if (!file) return; // text and copied elements: Excalidraw pastes them (see onPaste)
+      e.preventDefault();
+      e.stopPropagation();
+      onIncomingFile(file);
+    };
+    root.addEventListener('dragover', onDragOver, true);
+    root.addEventListener('drop', onDrop, true);
+    window.addEventListener('paste', onPasteCapture, true);
+    return () => {
+      root.removeEventListener('dragover', onDragOver, true);
+      root.removeEventListener('drop', onDrop, true);
+      window.removeEventListener('paste', onPasteCapture, true);
+    };
+  }, []);
+
+  // Copied elements whose images are not our uploads (e.g. from another Excalidraw) would never be stored or shared.
+  const onPaste = useCallback(
+    (data: ClipboardData) => {
+      if (data.elements && hasUnstoredImages(data.elements)) {
+        onError('board.pasteImages');
+        return false;
+      }
+      return true;
+    },
+    [onError],
+  );
+
   const sortedFrames = [...frames].sort((a, b) => a.y - b.y);
 
   return (
@@ -610,11 +667,14 @@ export default function Board({
         onChange={onChange}
         onScrollChange={onScrollChange}
         onPointerUpdate={onPointerUpdate}
+        onPaste={onPaste}
         isCollaborating
         theme={theme}
         langCode={locale === 'fr' ? 'fr-FR' : 'en'}
         UIOptions={{
           canvasActions: { loadScene: false, saveToActiveFile: false, export: false, toggleTheme: false, changeViewBackgroundColor: false },
+          // Its images get SHA-1 ids and stay in this browser; ours are uploaded (Add menu, paste, drop).
+          tools: { image: false },
         }}
       />
 
@@ -745,8 +805,11 @@ function AddMenu({
         aria-haspopup="menu"
         aria-expanded={shown}
         aria-controls={shown ? menuId : undefined}
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
+        // aria-disabled, not disabled: the button keeps focus while a document is being added.
+        aria-disabled={disabled || undefined}
+        onClick={() => {
+          if (!disabled) setOpen((o) => !o);
+        }}
       >
         {t('board.add')}
         <svg aria-hidden viewBox="0 0 12 12" className={`size-3 transition-transform ${shown ? '' : 'rotate-180'}`}>

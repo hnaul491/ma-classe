@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterDocuments, groupDocuments, type FileRow } from './group';
+import { filterDocuments, groupDocuments, legacyFileRow, type FileRow } from './group';
 
 function row(p: Partial<FileRow> & { id: string }): FileRow {
   return {
@@ -59,5 +59,14 @@ describe('filterDocuments', () => {
   it('returns everything for a blank query', () => {
     expect(filterDocuments(docs, '   ')).toHaveLength(2);
     expect(filterDocuments(docs, '')).toHaveLength(2);
+  });
+});
+
+describe('legacyFileRow', () => {
+  it('fills the document columns for rows read before migration 0004', () => {
+    const { document_id, page_index, ...legacy } = row({ id: 'x', document_id: 'D', page_index: 3 });
+    void document_id;
+    void page_index;
+    expect(legacyFileRow(legacy)).toEqual({ ...legacy, document_id: null, page_index: 0 });
   });
 });

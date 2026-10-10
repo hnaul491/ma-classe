@@ -1,4 +1,4 @@
-import { FILE_ROW_COLUMNS, type FileRow } from '@/features/documents/group';
+import { FILE_ROW_COLUMNS, LEGACY_FILE_ROW_COLUMNS, legacyFileRow, shouldRetryWithoutDocumentColumns, type FileRow } from '@/features/documents/group';
 import { isUuid } from '@/features/documents/params';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import { sceneFileIds } from './files';
@@ -21,7 +21,10 @@ export async function loadBoard(lessonId: string): Promise<{ elements: BoardElem
 
 /** The stored files with these ids (missing ids are left out). */
 export async function loadFiles(fileIds: readonly string[]): Promise<StoredFile[]> {
-  const files = await createBrowserSupabase().from('files').select('id, storage_path, mime, width, height').in('id', fileIds);
+  // The id column is a uuid: any other id would fail the whole query (22P02).
+  const ids = fileIds.filter(isUuid);
+  if (ids.length === 0) return [];
+  const files = await createBrowserSupabase().from('files').select('id, storage_path, mime, width, height').in('id', ids);
   if (files.error) throw new Error('Could not load board files', { cause: files.error });
   return (files.data ?? []) as StoredFile[];
 }
@@ -34,8 +37,12 @@ export async function loadDocumentFiles(documentId: string): Promise<FileRow[]> 
     .select(FILE_ROW_COLUMNS)
     .or(`document_id.eq.${documentId},id.eq.${documentId}`)
     .order('page_index', { ascending: true });
-  if (error) throw new Error('Could not load the document', { cause: error });
-  return (data ?? []) as FileRow[];
+  if (!error) return (data ?? []) as FileRow[];
+  if (!shouldRetryWithoutDocumentColumns(error)) throw new Error('Could not load the document', { cause: error });
+  // Before migration 0004 runs, every file is its own document.
+  const legacy = await createBrowserSupabase().from('files').select(LEGACY_FILE_ROW_COLUMNS).eq('id', documentId);
+  if (legacy.error) throw new Error('Could not load the document', { cause: legacy.error });
+  return ((legacy.data ?? []) as Omit<FileRow, 'document_id' | 'page_index'>[]).map(legacyFileRow);
 }
 
 export async function saveBoard(lessonId: string, email: string, elements: readonly BoardElement[]): Promise<void> {

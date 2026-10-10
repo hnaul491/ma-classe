@@ -1,3 +1,5 @@
+import { shouldRetryWithoutDocumentColumns } from '@/features/documents/group';
+import { isUuid } from '@/features/documents/params';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
 export const MAX_BYTES = 30 * 1024 * 1024;
@@ -28,11 +30,15 @@ export function isLessonPath(lessonId: string, path: string): boolean {
 /**
  * The path an upload gives this file (`<lesson folder>/<fileId>.webp`). A document re-used from an
  * older lesson stays in that lesson's folder, so peer `file` messages may point there too.
+ * Upload ids are uuids; anything else is not one of our files.
  */
 export function isFilePathFor(fileId: string, path: string): boolean {
+  if (!isUuid(fileId)) return false;
   const parts = path.split('/');
   return parts.length === 2 && parts[0] !== '' && parts[0] !== '.' && parts[0] !== '..' && parts[1] === `${fileId}.webp`;
 }
+
+export { shouldRetryWithoutDocumentColumns };
 
 export type RenderedPage = { blob: Blob; width: number; height: number };
 
@@ -48,7 +54,7 @@ export async function uploadBoardImage(
   const path = `${lessonId}/${fileId}.webp`;
   const up = await supabase.storage.from(BUCKET).upload(path, page.blob, { contentType: 'image/webp', upsert: false });
   if (up.error) throw new Error('Could not upload the image', { cause: up.error });
-  const row = await supabase.from('files').insert({
+  const base = {
     id: fileId,
     lesson_id: lessonId,
     storage_path: path,
@@ -58,9 +64,10 @@ export async function uploadBoardImage(
     width: page.width,
     height: page.height,
     name,
-    document_id: doc?.documentId ?? null,
-    page_index: doc?.pageIndex ?? 0,
-  });
+  };
+  let row = await supabase.from('files').insert({ ...base, document_id: doc?.documentId ?? null, page_index: doc?.pageIndex ?? 0 });
+  // Before migration 0004 runs, record the file without its document grouping rather than fail.
+  if (shouldRetryWithoutDocumentColumns(row.error)) row = await supabase.from('files').insert(base);
   if (row.error) throw new Error('Could not record the image', { cause: row.error });
   return { fileId, path };
 }

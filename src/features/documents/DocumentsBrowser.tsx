@@ -8,6 +8,7 @@ import { useT } from '@/lib/i18n/client';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import { filterDocuments, type DocumentGroup } from './group';
 import { Modal } from './Modal';
+import { currentPageFrom } from './viewer';
 
 const BUCKET = 'lesson-files';
 const SIGNED_URL_SECONDS = 3600;
@@ -113,6 +114,19 @@ function DocumentViewer({
   const t = useT();
   const [urls, setUrls] = useState<Record<string, string>>(() => (firstThumb ? { [doc.pages[0].storage_path]: firstThumb } : {}));
   const [failed, setFailed] = useState(false);
+  /** Paths already re-signed after an image error, so an expired URL is renewed once, not in a loop. */
+  const resigned = useRef(new Set<string>());
+
+  function resign(path: string) {
+    if (resigned.current.has(path)) return;
+    resigned.current.add(path);
+    void createBrowserSupabase()
+      .storage.from(BUCKET)
+      .createSignedUrl(path, SIGNED_URL_SECONDS)
+      .then(({ data }) => {
+        if (data?.signedUrl) setUrls((prev) => ({ ...prev, [path]: data.signedUrl }));
+      }, () => {});
+  }
   const [current, setCurrent] = useState(0);
   const pageRefs = useRef<(HTMLElement | null)[]>([]);
 
@@ -139,9 +153,13 @@ function DocumentViewer({
     const els = pageRefs.current.filter((el): el is HTMLElement => el !== null);
     const io = new IntersectionObserver(
       (entries) => {
-        for (const e of entries) if (e.isIntersecting) setCurrent(Number((e.target as HTMLElement).dataset.index));
+        const page = currentPageFrom(
+          entries.map((e) => ({ index: Number((e.target as HTMLElement).dataset.index), isIntersecting: e.isIntersecting, intersectionRatio: e.intersectionRatio })),
+        );
+        if (page !== null) setCurrent(page);
       },
-      { threshold: 0.5 },
+      // A thin reading band near the top: works for pages taller than the screen too.
+      { rootMargin: '-40% 0px -55% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] },
     );
     for (const el of els) io.observe(el);
     return () => io.disconnect();
@@ -215,6 +233,7 @@ function DocumentViewer({
                   src={url}
                   alt={alt}
                   loading="lazy"
+                  onError={() => resign(p.storage_path)}
                   width={p.width}
                   height={p.height}
                   className="h-auto w-full rounded-lg border border-line bg-surface shadow-sm"
