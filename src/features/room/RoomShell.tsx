@@ -6,8 +6,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
+import { useT } from '@/lib/i18n/client';
 import type { Stage, SyncMessage } from '@/features/sync/protocol';
 import { useSync } from '@/features/sync/useSync';
+import type { MessageKey } from '@/lib/i18n/messages';
 import type { Member } from '@/lib/lessons/types';
 import { ControlBar } from './ControlBar';
 import { FloatingCams } from './FloatingCams';
@@ -30,14 +32,15 @@ import { useToast } from './useToast';
 
 /** Stage modules built so far. Plans 2 and 3 add 'board' and 'media'. */
 const AVAILABLE: readonly Stage[] = ['cameras', 'screen'];
-const STAGE_LABEL: Record<Stage, string> = {
-  cameras: 'the cameras',
-  board: 'the board',
-  screen: 'a shared screen',
-  media: 'a video',
+const STAGE_KEY: Record<Stage, MessageKey> = {
+  cameras: 'stage.cameras',
+  board: 'stage.board',
+  screen: 'stage.screen',
+  media: 'stage.media',
 };
 
 export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; member: Member; planBUrl: string }) {
+  const t = useT();
   const room = useRoomContext();
   const { localParticipant, isScreenShareEnabled } = useLocalParticipant();
   const screenTracks = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
@@ -60,10 +63,10 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       if (next === prev) return;
       applyStage(next);
       if (prev.by !== null && next.stage !== prev.stage) {
-        showToast(`${msg.by === 'teacher' ? 'Teacher' : 'Student'} opened ${STAGE_LABEL[next.stage]}`);
+        showToast(t(msg.by === 'teacher' ? 'room.teacherOpened' : 'room.studentOpened', { stage: t(STAGE_KEY[next.stage]) }));
       }
     },
-    [applyStage, showToast],
+    [applyStage, showToast, t],
   );
   const send = useSync(onMessage);
 
@@ -122,30 +125,30 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       await localParticipant.setScreenShareEnabled(true, SCREEN_CAPTURE);
       changeStage('screen');
     } catch (err) {
-      if (!isUserCancel(err)) showToast('Screen sharing failed. Try again, or share a single tab.');
+      if (!isUserCancel(err)) showToast(t('room.shareFailed'));
     }
-  }, [localParticipant, changeStage, showToast]);
+  }, [localParticipant, changeStage, showToast, t]);
 
   const onEnd = useCallback(async () => {
     if (member.role === 'teacher') {
       try {
         await endLesson(lessonId);
       } catch {
-        showToast('Could not end the lesson. Check your connection and try again.');
+        showToast(t('room.endFailed'));
         return;
       }
     }
     await room.disconnect();
-  }, [member.role, lessonId, room, showToast]);
+  }, [member.role, lessonId, room, showToast, t]);
 
   // A camera or mic that stops working mid-lesson.
   useEffect(() => {
-    const onDeviceError = () => showToast('Camera or microphone stopped working. Check it is plugged in, then turn it off and on.');
+    const onDeviceError = () => showToast(t('room.deviceStopped'));
     room.on(RoomEvent.MediaDevicesError, onDeviceError);
     return () => {
       room.off(RoomEvent.MediaDevicesError, onDeviceError);
     };
-  }, [room, showToast]);
+  }, [room, showToast, t]);
 
   const visible = resolveVisibleStage(stage.stage, { screenActive: screenTracks.length > 0, available: AVAILABLE });
   const renderBar = (compact: boolean) => (
@@ -184,8 +187,8 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
           <button
             type="button"
             onClick={() => void fs.toggle()}
-            title={fs.active ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'}
-            aria-label={fs.active ? 'Exit fullscreen' : 'Fullscreen'}
+            title={fs.active ? t('room.exitFullscreenHint') : t('room.fullscreenHint')}
+            aria-label={fs.active ? t('room.exitFullscreen') : t('room.fullscreen')}
             className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${visible === 'cameras' || fs.active ? 'right-3' : 'right-48'}`}
           >
             {fs.active ? <ExitFullscreenIcon /> : <FullscreenIcon />}

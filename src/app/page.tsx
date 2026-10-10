@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { getMember } from '@/lib/auth/session';
+import { formatLessonDate } from '@/lib/i18n/messages';
+import { getLocale, getT } from '@/lib/i18n/server';
 import type { Lesson } from '@/lib/lessons/types';
 import { createClient } from '@/lib/supabase/server';
 import { startLesson } from './actions';
@@ -13,6 +16,8 @@ function minutesBetween(a: string, b: string | null): number | null {
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ ended?: string }> }) {
   const sp = await searchParams;
+  const locale = await getLocale();
+  const t = await getT();
   const { member } = await getMember();
   if (!member) redirect('/login?denied=1');
 
@@ -30,41 +35,46 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-3xl font-bold">Ma Classe</h1>
-        <span className="rounded bg-surface-2 px-2 py-1 text-xs uppercase tracking-wide text-muted">{member.role}</span>
+        <div className="flex items-center gap-3">
+          <LanguageSwitch />
+          <span className="rounded bg-surface-2 px-2 py-1 text-xs uppercase tracking-wide text-muted">
+            {t(member.role === 'teacher' ? 'role.teacher' : 'role.student')}
+          </span>
+        </div>
       </header>
 
-      {sp.ended && <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">The lesson has ended.</p>}
+      {sp.ended && <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">{t('home.ended')}</p>}
 
       <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5">
         {live ? (
           <>
-            <p className="font-semibold">Lesson in progress: {live.title}</p>
+            <p className="font-semibold">{t('home.inProgress', { title: live.title })}</p>
             <Link href={`/lesson/${live.id}`} className="self-start rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
-              Join lesson
+              {t('home.joinLesson')}
             </Link>
           </>
         ) : member.role === 'teacher' ? (
           <form action={startLesson}>
             <button type="submit" className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
-              Start lesson
+              {t('home.startLesson')}
             </button>
           </form>
         ) : (
           <>
-            <p className="text-muted">Waiting for your teacher to start the lesson. This page updates by itself.</p>
+            <p className="text-muted">{t('home.waiting')}</p>
             <LivePoller />
           </>
         )}
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold">Past lessons</h2>
-        {past.length === 0 && <p className="text-muted">No lessons yet.</p>}
+        <h2 className="text-lg font-semibold">{t('home.pastLessons')}</h2>
+        {past.length === 0 && <p className="text-muted">{t('home.noLessons')}</p>}
         <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
           {past.map((l) => (
             <li key={l.id} className="flex justify-between gap-4 px-4 py-3">
-              <span>{l.title}</span>
-              <span className="text-sm tabular-nums text-muted">{minutesBetween(l.started_at, l.ended_at) ?? '–'} min</span>
+              <span>{t('lesson.title', { date: formatLessonDate(l.started_at, locale) })}</span>
+              <span className="text-sm tabular-nums text-muted">{t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}</span>
             </li>
           ))}
         </ul>

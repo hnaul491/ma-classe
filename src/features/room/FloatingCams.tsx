@@ -1,9 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 
 export function FloatingCams() {
+  const t = useT();
   const [hidden, setHidden] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
@@ -15,7 +17,7 @@ export function FloatingCams() {
         onClick={() => setHidden(false)}
         className="fixed right-4 top-16 z-20 rounded-full bg-surface px-3 py-1 text-xs shadow"
       >
-        Show cameras
+        {t('cams.show')}
       </button>
     );
   }
@@ -43,7 +45,7 @@ export function FloatingCams() {
         onClick={() => setHidden(true)}
         className="w-full pb-1 text-center text-xs text-muted"
       >
-        Hide cameras
+        {t('cams.hide')}
       </button>
     </div>
   );

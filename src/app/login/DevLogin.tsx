@@ -2,10 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
 export function DevLogin() {
   const router = useRouter();
+  const t = useT();
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -22,17 +24,17 @@ export function DevLogin() {
 
   return (
     <form onSubmit={onSubmit} className="flex w-72 flex-col gap-2 rounded-lg border border-dashed border-line p-4">
-      <p className="text-xs text-muted">Dev only: password sign-in</p>
+      <p className="text-xs text-muted">{t('login.devOnly')}</p>
       <label className="flex flex-col text-sm">
-        Email
+        {t('login.email')}
         <input id="dev-email" name="email" type="email" className="rounded border border-line bg-surface px-2 py-1" />
       </label>
       <label className="flex flex-col text-sm">
-        Password
+        {t('login.password')}
         <input id="dev-password" name="password" type="password" className="rounded border border-line bg-surface px-2 py-1" />
       </label>
       <button type="submit" className="rounded bg-surface-2 px-3 py-1.5 text-sm">
-        Sign in with password
+        {t('login.withPassword')}
       </button>
       {error && <p className="text-sm text-pen">{error}</p>}
     </form>

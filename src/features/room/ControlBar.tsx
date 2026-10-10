@@ -3,6 +3,7 @@
 import { useTrackToggle } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import type { Role } from '@/lib/lessons/types';
 import { CamIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
 
@@ -50,6 +51,7 @@ export function ControlBar({
   planBUrl: string;
   compact?: boolean;
 }) {
+  const t = useT();
   const mic = useTrackToggle({ source: Track.Source.Microphone });
   const cam = useTrackToggle({ source: Track.Source.Camera });
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -60,7 +62,7 @@ export function ControlBar({
     return () => clearTimeout(id);
   }, [confirmEnd]);
 
-  const endLabel = role === 'teacher' ? (confirmEnd ? 'Click again to end' : 'End lesson') : 'Leave';
+  const endLabel = role === 'teacher' ? (confirmEnd ? t('bar.confirmEnd') : t('bar.end')) : t('bar.leave');
   const onEndClick = () => {
     if (role === 'teacher' && !confirmEnd) return setConfirmEnd(true);
     onEnd();
@@ -74,14 +76,14 @@ export function ControlBar({
           : 'flex items-center gap-1.5 border-t border-line bg-surface px-3 py-2'
       }
     >
-      <IconButton label={mic.enabled ? 'Mute microphone' : 'Unmute microphone'} onClick={() => void mic.toggle()}>
+      <IconButton label={mic.enabled ? t('bar.mute') : t('bar.unmute')} onClick={() => void mic.toggle()}>
         {mic.enabled ? <MicIcon /> : <MicOffIcon />}
       </IconButton>
-      <IconButton label={cam.enabled ? 'Turn camera off' : 'Turn camera on'} onClick={() => void cam.toggle()}>
+      <IconButton label={cam.enabled ? t('bar.camOff') : t('bar.camOn')} onClick={() => void cam.toggle()}>
         {cam.enabled ? <CamIcon /> : <CamOffIcon />}
       </IconButton>
       <span className="mx-1 h-4 w-px bg-line" aria-hidden />
-      <IconButton label={screenSharing ? 'Stop sharing' : 'Share screen'} active={screenSharing} onClick={onToggleShare}>
+      <IconButton label={screenSharing ? t('bar.stopShare') : t('bar.share')} active={screenSharing} onClick={onToggleShare}>
         <ShareIcon />
       </IconButton>
       {!compact && <span className="flex-1" />}
@@ -90,8 +92,8 @@ export function ControlBar({
           href={planBUrl}
           target="_blank"
           rel="noopener"
-          title="Plan B: open Google Meet"
-          aria-label="Plan B: open Google Meet"
+          title={t('bar.planB')}
+          aria-label={t('bar.planB')}
           className={`${btn} bg-hl text-hl-ink`}
         >
           <PlanBIcon />
@@ -105,7 +107,7 @@ export function ControlBar({
         className={`flex h-9 items-center justify-center gap-1.5 rounded-full bg-pen px-3 text-surface ${confirmEnd ? 'ring-2 ring-pen ring-offset-2 ring-offset-surface' : ''}`}
       >
         <EndIcon />
-        {confirmEnd && <span className="text-xs font-semibold">Click again</span>}
+        {confirmEnd && <span className="text-xs font-semibold">{t('bar.clickAgain')}</span>}
       </button>
     </div>
   );

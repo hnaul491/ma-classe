@@ -20,7 +20,7 @@ describe('authorizeJoin', () => {
     expect(authorizeJoin({ signedIn: false, member: null, lesson: null })).toEqual({
       ok: false,
       status: 401,
-      reason: 'Sign in first.',
+      reason: 'join.signInFirst',
     });
   });
 
@@ -28,7 +28,7 @@ describe('authorizeJoin', () => {
     expect(authorizeJoin({ signedIn: true, member: null, lesson: { status: 'live' } })).toEqual({
       ok: false,
       status: 403,
-      reason: 'This classroom is private.',
+      reason: 'join.private',
     });
   });
 
@@ -36,7 +36,7 @@ describe('authorizeJoin', () => {
     expect(authorizeJoin({ signedIn: true, member: student, lesson: null })).toEqual({
       ok: false,
       status: 404,
-      reason: 'This lesson does not exist.',
+      reason: 'join.notFound',
     });
   });
 
@@ -44,7 +44,7 @@ describe('authorizeJoin', () => {
     expect(authorizeJoin({ signedIn: true, member: student, lesson: { status: 'ended' } })).toEqual({
       ok: false,
       status: 409,
-      reason: 'This lesson has ended.',
+      reason: 'join.ended',
     });
   });
 

@@ -2,11 +2,13 @@
 
 import { isTrackReference, useTracks, VideoTrack, type TrackReferenceOrPlaceholder } from '@livekit/components-react';
 import { Track } from 'livekit-client';
+import { useT } from '@/lib/i18n/client';
 
 function CameraTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+  const t = useT();
   const p = trackRef.participant;
   const name = p.name || p.identity;
-  const label = p.isLocal ? 'You' : name;
+  const label = p.isLocal ? t('tile.you') : name;
   const showVideo = isTrackReference(trackRef) && !trackRef.publication.isMuted;
   return (
     <div data-testid="camera-tile" className="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-surface-2">

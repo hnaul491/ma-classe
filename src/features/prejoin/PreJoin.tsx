@@ -3,6 +3,7 @@
 import { useMediaDevices, usePreviewTracks } from '@livekit/components-react';
 import { Track, VideoPresets, type LocalAudioTrack, type LocalVideoTrack } from 'livekit-client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import type { Role } from '@/lib/lessons/types';
 import { playTestSound, useMicLevel } from './audio';
 import { usePresence } from './usePresence';
@@ -28,6 +29,7 @@ export function PreJoin({
   planBUrl: string;
   onJoin: (c: JoinChoices) => Promise<void>;
 }) {
+  const t = useT();
   const [videoDeviceId, setVideoDeviceId] = useState<string | undefined>();
   const [audioDeviceId, setAudioDeviceId] = useState<string | undefined>();
   const [audioOutputId, setAudioOutputId] = useState<string | undefined>();
@@ -42,8 +44,8 @@ export function PreJoin({
     [audioDeviceId, videoDeviceId],
   );
   const tracks = usePreviewTracks(options, (e) => setDeviceError(e.message));
-  const videoTrack = tracks?.find((t) => t.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
-  const audioTrack = tracks?.find((t) => t.kind === Track.Kind.Audio) as LocalAudioTrack | undefined;
+  const videoTrack = tracks?.find((tr) => tr.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
+  const audioTrack = tracks?.find((tr) => tr.kind === Track.Kind.Audio) as LocalAudioTrack | undefined;
 
   const videoEl = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -61,7 +63,6 @@ export function PreJoin({
   const speakers = useMediaDevices({ kind: 'audiooutput' });
   const presence = usePresence(lessonId);
   const otherIn = role === 'student' ? presence.teacher : presence.student;
-  const otherName = role === 'student' ? 'Teacher' : 'Your student';
 
   async function join() {
     setJoining(true);
@@ -84,13 +85,13 @@ export function PreJoin({
         {videoTrack ? (
           <video ref={videoEl} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
         ) : (
-          <div className="flex h-full items-center justify-center text-muted">Camera is off</div>
+          <div className="flex h-full items-center justify-center text-muted">{t('prejoin.cameraOff')}</div>
         )}
       </div>
 
       <div className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
-          Camera
+          {t('prejoin.camera')}
           <select
             id="prejoin-camera"
             className="rounded border border-line bg-surface px-2 py-1.5"
@@ -100,17 +101,17 @@ export function PreJoin({
               setVideoDeviceId(e.target.value || undefined);
             }}
           >
-            <option value="">Default camera</option>
+            <option value="">{t('prejoin.defaultCamera')}</option>
             {cams.map((d) => (
               <option key={d.deviceId} value={d.deviceId}>
-                {d.label || 'Camera'}
+                {d.label || t('prejoin.camera')}
               </option>
             ))}
           </select>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          Microphone
+          {t('prejoin.mic')}
           <select
             id="prejoin-mic"
             className="rounded border border-line bg-surface px-2 py-1.5"
@@ -120,17 +121,17 @@ export function PreJoin({
               setAudioDeviceId(e.target.value || undefined);
             }}
           >
-            <option value="">Default microphone</option>
+            <option value="">{t('prejoin.defaultMic')}</option>
             {mics.map((d) => (
               <option key={d.deviceId} value={d.deviceId}>
-                {d.label || 'Microphone'}
+                {d.label || t('prejoin.mic')}
               </option>
             ))}
           </select>
         </label>
 
         <div className="flex items-center gap-3 text-sm">
-          <span className="w-24 text-muted">Mic level</span>
+          <span className="w-24 text-muted">{t('prejoin.micLevel')}</span>
           <span className="h-2 flex-1 overflow-hidden rounded bg-surface-2" aria-hidden>
             <span className="block h-full bg-good" style={{ width: `${Math.round(Math.min(1, level * 3) * 100)}%` }} />
           </span>
@@ -138,17 +139,17 @@ export function PreJoin({
 
         {speakers.length > 0 && (
           <label className="flex flex-col gap-1 text-sm">
-            Speaker
+            {t('prejoin.speaker')}
             <select
               id="prejoin-speaker"
               className="rounded border border-line bg-surface px-2 py-1.5"
               value={audioOutputId ?? ''}
               onChange={(e) => setAudioOutputId(e.target.value || undefined)}
             >
-              <option value="">Default speaker</option>
+              <option value="">{t('prejoin.defaultSpeaker')}</option>
               {speakers.map((d) => (
                 <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || 'Speaker'}
+                  {d.label || t('prejoin.speaker')}
                 </option>
               ))}
             </select>
@@ -160,23 +161,25 @@ export function PreJoin({
           onClick={() => playTestSound(audioOutputId)}
           className="self-start rounded bg-surface-2 px-3 py-1.5 text-sm"
         >
-          Play test sound
+          {t('prejoin.testSound')}
         </button>
 
         <p className={otherIn ? 'text-good' : 'text-muted'}>
-          {otherIn ? `${otherName} is in the room` : `${otherName} hasn't joined yet`}
+          {role === 'student'
+            ? t(otherIn ? 'prejoin.teacherIn' : 'prejoin.teacherNotIn')
+            : t(otherIn ? 'prejoin.studentIn' : 'prejoin.studentNotIn')}
         </p>
 
         {deviceError && (
           <p className="text-sm text-pen">
-            Camera or microphone problem: {deviceError}. Check browser permissions, then reload.
+            {t('prejoin.deviceProblem', { error: deviceError })}
           </p>
         )}
         {error && (
           <p className="text-sm text-pen">
             {error}{' '}
             <a href={planBUrl} target="_blank" rel="noopener" className="underline">
-              Open Plan B
+              {t('common.openPlanB')}
             </a>
           </p>
         )}
@@ -187,7 +190,7 @@ export function PreJoin({
           disabled={joining}
           className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface disabled:opacity-60"
         >
-          {joining ? 'Joining…' : 'Join lesson'}
+          {joining ? t('prejoin.joining') : t('home.joinLesson')}
         </button>
       </div>
     </main>
