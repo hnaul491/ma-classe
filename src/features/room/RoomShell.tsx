@@ -80,7 +80,7 @@ export function RoomShell({
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
   // Personal: each person opens and closes their own chat; it is not synced.
-  // On board and screen stages (outside fullscreen, from sm up) the chat is docked under the cameras and
+  // On board and screen stages (outside fullscreen, from lg up) the chat is docked under the cameras and
   // open by default; the Chat button folds it. Elsewhere it is the overlay panel, closed by default.
   const wide = useMediaQuery('(min-width: 1024px)');
   const railShown = visible !== 'cameras' && !fsActive;
@@ -351,14 +351,14 @@ export function RoomShell({
             the bar is outside this box normally, and in fullscreen the panel stops above it.
             Beside the camera rail, not over it; on a phone it takes the whole width. */}
         {!docked && (
-          <div className={overlayOpen ? `absolute right-0 top-0 z-20 w-full p-2 sm:w-auto ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
+          <div className={overlayOpen ? `absolute ${railShown ? 'right-0 sm:right-44' : 'right-0'} top-0 z-20 w-full p-2 sm:w-auto ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
             {chatPanel}
           </div>
         )}
 
         {/* The exit control sits beside the bar, never in the top-right corner where the board has its own buttons. */}
         {fsActive && barVisible && (
-          <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex items-center justify-center gap-2 px-2 [&>*]:pointer-events-auto">
             {renderBar(true)}
             {fullscreenButton('')}
           </div>
