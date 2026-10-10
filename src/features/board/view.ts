@@ -42,6 +42,27 @@ export function followReducer(
   }
 }
 
+/** Live frames whose name matches the page template (e.g. "Page {n}"), so new pages continue the count. */
+export function countPageFrames(
+  elements: readonly { type: string; name?: string | null; isDeleted?: boolean }[],
+  template: string,
+): number {
+  const escaped = template.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{n\\}', '\\d+');
+  const pattern = new RegExp(`^${escaped}$`);
+  return elements.filter((e) => e.type === 'frame' && !e.isDeleted && typeof e.name === 'string' && pattern.test(e.name)).length;
+}
+
+/** Lowest edge of the live elements, or null for an empty scene. */
+export function sceneBottom(elements: readonly { y: number; height: number; isDeleted?: boolean }[]): number | null {
+  let bottom: number | null = null;
+  for (const e of elements) {
+    if (e.isDeleted) continue;
+    const b = Math.max(e.y, e.y + e.height);
+    if (bottom === null || b > bottom) bottom = b;
+  }
+  return bottom;
+}
+
 export function layoutPages(
   sizes: readonly { width: number; height: number }[],
   opts: { x?: number; y?: number; width?: number; gap?: number } = {},

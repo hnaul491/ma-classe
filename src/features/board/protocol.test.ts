@@ -8,6 +8,7 @@ describe('board protocol', () => {
     const msgs: BoardMessage[] = [
       { t: 'elements', elements: [el] },
       { t: 'scene-req' },
+      { t: 'viewport-req' },
       { t: 'file', fileId: 'f1', path: 'l/f1.webp', mime: 'image/webp', width: 800, height: 600 },
       { t: 'viewport', cx: 10.5, cy: -4, zoom: 1.25 },
       { t: 'pointer', x: 1, y: 2, tool: 'laser', button: 'down' },

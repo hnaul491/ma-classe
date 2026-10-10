@@ -1,36 +1,51 @@
 'use client';
 
 import '@excalidraw/excalidraw/index.css';
-import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, reconcileElements } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, reconcileElements, restoreElements } from '@excalidraw/excalidraw';
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile';
 import type { ExcalidrawElement, FileId, OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
+import { useRoomContext } from '@livekit/components-react';
+import { RoomEvent, type RemoteParticipant } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
+import { parseBackup } from '@/features/board/backup';
 import { backupKey, loadBoard, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
 import { createSaveQueue } from '@/features/board/saveQueue';
-import { checkUpload, downloadAsDataURL, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
+import { createDebounce, createThrottle, type Debounce, type Throttle } from '@/features/board/timing';
+import { checkUpload, downloadAsDataURL, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
-import { changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
-import { followReducer, layoutPages, scrollForCenter, viewCenter } from '@/features/board/view';
+import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
+import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter } from '@/features/board/view';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { Member } from '@/lib/lessons/types';
 
 const SEND_EVERY_MS = 50;
+const SEND_MAX_WAIT_MS = 150;
 const VIEWPORT_EVERY_MS = 100;
 const POINTER_EVERY_MS = 50;
+/** Space above the first inserted page, and between page images (as in layoutPages: 80 px, frames add 20 each side). */
+const FIRST_PAGE_GAP = 160;
+const NEXT_PAGE_GAP = 60;
+
+type PointerMessage = Extract<BoardMessage, { t: 'pointer' }>;
+type SaveQueue = ReturnType<typeof createSaveQueue>;
+type BoardSend = ReturnType<typeof useBoardChannel>['send'];
+
+function readTheme(): 'light' | 'dark' {
+  if (typeof document === 'undefined') return 'light';
+  const attr = document.documentElement.dataset.theme;
+  return attr === 'dark' || (!attr && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+}
 
 function useThemeName(): 'light' | 'dark' {
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  // Read synchronously on first render (Board is client-only) so dark mode does not flash.
+  const [theme, setTheme] = useState(readTheme);
   useEffect(() => {
-    const read = () => {
-      const attr = document.documentElement.dataset.theme;
-      setTheme(attr === 'dark' || (!attr && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
-    };
-    read();
+    const read = () => setTheme(readTheme());
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const mo = new MutationObserver(read);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
@@ -41,6 +56,36 @@ function useThemeName(): 'light' | 'dark' {
     };
   }, []);
   return theme;
+}
+
+function writeBackup(key: string, scene: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(scene));
+  } catch {
+    // Storage full or blocked: the save retry still runs.
+  }
+}
+
+function readBackup(key: string): BoardElement[] | null {
+  try {
+    return parseBackup(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function removeBackup(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Blocked storage: nothing to remove.
+  }
+}
+
+function viewportOf(api: ExcalidrawImperativeAPI): BoardMessage {
+  const s = api.getAppState();
+  const c = viewCenter({ scrollX: s.scrollX, scrollY: s.scrollY, zoom: s.zoom.value, width: s.width, height: s.height });
+  return { t: 'viewport', cx: c.cx, cy: c.cy, zoom: s.zoom.value };
 }
 
 export default function Board({
@@ -57,43 +102,28 @@ export default function Board({
   const t = useT();
   const locale = useLocale();
   const theme = useThemeName();
+  const room = useRoomContext();
+  const isStudent = member.role === 'student';
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const known = useRef<KnownVersions>(new Map());
-  const pendingSend = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const lastViewportSent = useRef(0);
-  const lastPointerSent = useRef(0);
+  /** The scene as of the last onChange (Excalidraw clears its own scene on unmount). */
+  const latest = useRef<readonly OrderedExcalidrawElement[]>([]);
+  /** True once the saved board is loaded; until then nothing is saved, so a partial scene never overwrites it. */
+  const loaded = useRef(false);
+  const queue = useRef<SaveQueue | null>(null);
+  const elementSender = useRef<Debounce | null>(null);
+  const viewportSender = useRef<Throttle<null> | null>(null);
+  const pointerSender = useRef<Throttle<PointerMessage> | null>(null);
+  const lastButton = useRef<'up' | 'down'>('up');
   const collaborators = useRef(new Map<SocketId, Collaborator>());
-  const [follow, dispatchFollow] = useReducer(followReducer, { following: member.role === 'student', lastApplied: null });
+  const [follow, dispatchFollow] = useReducer(followReducer, { following: isStudent, lastApplied: null });
   const [progress, setProgress] = useState<string | null>(null);
   const [frames, setFrames] = useState<ExcalidrawElement[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Latest onError without re-running effects when the parent passes a new function.
   const reportError = useEffectEvent((key: MessageKey) => onError(key));
-
-  // Created in an effect (not during render) so a StrictMode remount gets a fresh, undisposed queue.
-  const queue = useRef<SaveQueue | null>(null);
-  useEffect(() => {
-    const q = createSaveQueue({
-      save: (scene) => saveBoard(lessonId, member.email, (scene as { elements: BoardElement[] }).elements),
-      backup: (scene) => {
-        try {
-          localStorage.setItem(backupKey(lessonId), JSON.stringify(scene));
-        } catch {
-          // Storage full or blocked: the retry still runs.
-        }
-      },
-      onFailures: (n) => {
-        if (n === 3) reportError('board.saveFailed');
-      },
-    });
-    queue.current = q;
-    return () => {
-      if (queue.current === q) queue.current = null;
-      void q.flush();
-      q.dispose();
-    };
-  }, [lessonId, member.email]);
 
   const addFileFromStorage = useCallback(
     async (fileId: string, path: string, mime: string) => {
@@ -105,15 +135,25 @@ export default function Board({
   );
 
   const applyRemote = useCallback(
-    (remote: BoardElement[]) => {
+    (remote: readonly BoardElement[]) => {
       if (!api) return;
+      let restored: OrderedExcalidrawElement[];
+      try {
+        // Repairs malformed peer data. Local elements are deliberately not passed: with them,
+        // restoreElements bumps a stale remote element above a newer local one.
+        restored = restoreElements(remote as unknown as readonly ExcalidrawElement[], null);
+      } catch {
+        return;
+      }
       const merged = reconcileElements(
         api.getSceneElementsIncludingDeleted() as OrderedExcalidrawElement[],
-        remote as unknown as RemoteExcalidrawElement[],
+        restored as unknown as RemoteExcalidrawElement[],
         api.getAppState(),
       );
-      markKnown(known.current, remote);
+      markKnown(known.current, adoptedElements(merged, restored));
       api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+      // saveBoard writes the whole scene, so remote changes must be saved too.
+      if (loaded.current) queue.current?.push({ elements: api.getSceneElementsIncludingDeleted() });
     },
     [api],
   );
@@ -132,11 +172,14 @@ export default function Board({
           { to: [from] },
         ).catch(() => {});
         break;
+      case 'viewport-req':
+        if (!isStudent) void sendRef.current?.(viewportOf(api), { to: [from] }).catch(() => {});
+        break;
       case 'file':
-        void addFileFromStorage(msg.fileId, msg.path, msg.mime).catch(() => {});
+        if (isLessonPath(lessonId, msg.path)) void addFileFromStorage(msg.fileId, msg.path, msg.mime).catch(() => {});
         break;
       case 'viewport': {
-        if (member.role !== 'student' || !follow.following) break;
+        if (!isStudent || !follow.following) break;
         const state = api.getAppState();
         const next = scrollForCenter({ cx: msg.cx, cy: msg.cy }, msg.zoom, { width: state.width, height: state.height });
         dispatchFollow({ type: 'applied', ...next, zoom: msg.zoom });
@@ -150,7 +193,7 @@ export default function Board({
         collaborators.current.set(from as SocketId, {
           pointer: { x: msg.x, y: msg.y, tool: msg.tool, renderCursor: msg.tool !== 'laser' },
           button: msg.button,
-          username: from,
+          username: room.getParticipantByIdentity(from)?.name || from,
         });
         api.updateScene({ collaborators: new Map(collaborators.current) });
         break;
@@ -161,17 +204,102 @@ export default function Board({
     sendRef.current = send;
   }, [send]);
 
-  // First load: the saved scene and its images, then ask the other person for anything newer.
+  // Saving and element sending. Created in an effect so a StrictMode remount gets fresh, undisposed ones.
+  useEffect(() => {
+    const key = backupKey(lessonId);
+    const q = createSaveQueue({
+      save: async (scene) => {
+        await saveBoard(lessonId, member.email, (scene as { elements: BoardElement[] }).elements);
+        removeBackup(key);
+      },
+      backup: (scene) => writeBackup(key, scene),
+      onFailures: (n) => {
+        if (n === 3) reportError('board.saveFailed');
+      },
+    });
+    const sender = createDebounce(
+      () => {
+        const all = latest.current as unknown as BoardElement[];
+        const changed = changedElements(known.current, all);
+        if (changed.length === 0) return;
+        markKnown(known.current, changed);
+        void send({ t: 'elements', elements: changed }).catch(() => {});
+        if (loaded.current) q.push({ elements: all });
+      },
+      SEND_EVERY_MS,
+      SEND_MAX_WAIT_MS,
+    );
+    const onPageHide = () => {
+      if (latest.current.length > 0) writeBackup(key, { elements: latest.current });
+    };
+    window.addEventListener('pagehide', onPageHide);
+    queue.current = q;
+    elementSender.current = sender;
+    return () => {
+      window.removeEventListener('pagehide', onPageHide);
+      if (queue.current === q) queue.current = null;
+      if (elementSender.current === sender) elementSender.current = null;
+      sender.flush(); // send the last strokes now
+      if (loaded.current) q.push({ elements: latest.current });
+      void q.flush().finally(() => q.dispose());
+    };
+  }, [lessonId, member.email, send]);
+
+  // Pointer (laser) and, for the teacher, viewport broadcasting.
+  useEffect(() => {
+    if (!api) return;
+    const pointer = createThrottle<PointerMessage>(
+      (m, kind) => void send(m, { lossy: kind !== 'now' }).catch(() => {}),
+      POINTER_EVERY_MS,
+    );
+    pointerSender.current = pointer;
+    let viewport: Throttle<null> | null = null;
+    let resize: ResizeObserver | null = null;
+    if (!isStudent) {
+      // Leading send is lossy; the trailing one carries the final position reliably.
+      const vp = createThrottle<null>(
+        (_, kind) => void send(viewportOf(api), { lossy: kind === 'leading' }).catch(() => {}),
+        VIEWPORT_EVERY_MS,
+        { alwaysTrailing: true },
+      );
+      viewport = vp;
+      viewportSender.current = vp;
+      // onScrollChange does not fire on resize, but the view centre moves.
+      resize = new ResizeObserver(() => vp.call(null));
+      if (rootRef.current) resize.observe(rootRef.current);
+    }
+    return () => {
+      pointer.cancel();
+      if (pointerSender.current === pointer) pointerSender.current = null;
+      viewport?.cancel();
+      if (viewport && viewportSender.current === viewport) viewportSender.current = null;
+      resize?.disconnect();
+    };
+  }, [api, isStudent, send]);
+
+  // First load: the saved scene, its images and any local backup; then ask the other person for anything newer.
   useEffect(() => {
     if (!api) return;
     let cancelled = false;
+    loaded.current = false;
+    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
     (async () => {
       try {
         const saved = await loadBoard(lessonId);
         if (cancelled) return;
         await Promise.all(saved.files.map((f) => addFileFromStorage(f.id, f.storage_path, f.mime).catch(() => {})));
+        if (cancelled) return;
         if (saved.elements.length > 0) applyRemote(saved.elements);
+        loaded.current = true;
+        const backup = readBackup(backupKey(lessonId));
+        if (backup) {
+          applyRemote(backup); // also pushes the merged scene to the save queue
+          const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
+          markKnown(known.current, all);
+          void send({ t: 'elements', elements: all }).catch(() => {});
+        }
       } catch {
+        if (cancelled) return;
         reportError('board.loadFailed');
       }
       void send({ t: 'scene-req' }).catch(() => {});
@@ -179,73 +307,82 @@ export default function Board({
     return () => {
       cancelled = true;
     };
-  }, [api, lessonId, addFileFromStorage, applyRemote, send]);
+  }, [api, lessonId, isStudent, addFileFromStorage, applyRemote, send]);
+
+  // After a reconnect: catch up both ways, save, and re-sync the follow view.
+  const onReconnected = useEffectEvent(() => {
+    if (!api) return;
+    void send({ t: 'scene-req' }).catch(() => {});
+    const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
+    markKnown(known.current, all);
+    void send({ t: 'elements', elements: all }).catch(() => {});
+    if (loaded.current) queue.current?.push({ elements: all });
+    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
+  });
+  const onPeerLeft = useEffectEvent((p: RemoteParticipant) => {
+    if (!collaborators.current.delete(p.identity as SocketId)) return;
+    api?.updateScene({ collaborators: new Map(collaborators.current) });
+  });
+  useEffect(() => {
+    const reconnected = () => onReconnected();
+    const left = (p: RemoteParticipant) => onPeerLeft(p);
+    room.on(RoomEvent.Reconnected, reconnected);
+    room.on(RoomEvent.ParticipantDisconnected, left);
+    return () => {
+      room.off(RoomEvent.Reconnected, reconnected);
+      room.off(RoomEvent.ParticipantDisconnected, left);
+    };
+  }, [room]);
 
   // A hidden Excalidraw has zero size; re-measure when it becomes visible.
   useEffect(() => {
     if (visible) api?.refresh();
   }, [visible, api]);
 
-  const onChange = useCallback(
-    (elements: readonly OrderedExcalidrawElement[]) => {
-      const all = elements as unknown as BoardElement[];
-      const nextFrames = elements.filter((e) => e.type === 'frame' && !e.isDeleted);
-      // onChange fires on every pointer move; only re-render when the frames really changed.
-      setFrames((prev) =>
-        prev.length === nextFrames.length && prev.every((f, i) => f.id === nextFrames[i].id && f.version === nextFrames[i].version)
-          ? prev
-          : nextFrames,
-      );
-      clearTimeout(pendingSend.current);
-      pendingSend.current = setTimeout(() => {
-        const changed = changedElements(known.current, all);
-        if (changed.length === 0) return;
-        markKnown(known.current, changed);
-        void send({ t: 'elements', elements: changed }).catch(() => {});
-        queue.current?.push({ elements: all });
-      }, SEND_EVERY_MS);
-    },
-    [send],
-  );
+  const onChange = useCallback((elements: readonly OrderedExcalidrawElement[]) => {
+    latest.current = elements;
+    const nextFrames = elements.filter((e) => e.type === 'frame' && !e.isDeleted);
+    // onChange fires on every pointer move; only re-render when the frames really changed.
+    setFrames((prev) =>
+      prev.length === nextFrames.length && prev.every((f, i) => f.id === nextFrames[i].id && f.version === nextFrames[i].version)
+        ? prev
+        : nextFrames,
+    );
+    elementSender.current?.call();
+  }, []);
 
   const onScrollChange = useCallback(
     (scrollX: number, scrollY: number, zoom: { value: number }) => {
-      if (!api) return;
-      if (member.role === 'student') {
+      if (isStudent) {
         dispatchFollow({ type: 'scrolled', scrollX, scrollY, zoom: zoom.value });
         return;
       }
-      const now = Date.now();
-      if (now - lastViewportSent.current < VIEWPORT_EVERY_MS) return;
-      lastViewportSent.current = now;
-      const { width, height } = api.getAppState();
-      const c = viewCenter({ scrollX, scrollY, zoom: zoom.value, width, height });
-      void send({ t: 'viewport', cx: c.cx, cy: c.cy, zoom: zoom.value }, { lossy: true }).catch(() => {});
+      viewportSender.current?.call(null);
     },
-    [api, member.role, send],
+    [isStudent],
   );
 
   const onPointerUpdate = useCallback(
     (p: { pointer: { x: number; y: number; tool: 'pointer' | 'laser' }; button: 'down' | 'up' }) => {
-      const now = Date.now();
-      if (now - lastPointerSent.current < POINTER_EVERY_MS) return;
-      lastPointerSent.current = now;
-      void send({ t: 'pointer', x: p.pointer.x, y: p.pointer.y, tool: p.pointer.tool, button: p.button }, { lossy: true }).catch(() => {});
+      const sender = pointerSender.current;
+      if (!sender) return;
+      const m: PointerMessage = { t: 'pointer', x: p.pointer.x, y: p.pointer.y, tool: p.pointer.tool, button: p.button };
+      if (p.button !== lastButton.current) {
+        // Laser on/off must arrive at once and reliably.
+        lastButton.current = p.button;
+        sender.now(m);
+      } else {
+        sender.call(m);
+      }
     },
-    [send],
+    [],
   );
 
   async function placePages(pages: RenderedPage[], kind: 'page' | 'image', name: string) {
     if (!api) return;
     const state: AppState = api.getAppState();
-    const existing = api.getSceneElements();
-    const bottom = existing.reduce((m, e) => Math.max(m, e.y + e.height), 0);
     const center = viewCenter({ scrollX: state.scrollX, scrollY: state.scrollY, zoom: state.zoom.value, width: state.width, height: state.height });
-    const boxes =
-      kind === 'page'
-        ? layoutPages(pages, { x: 0, y: existing.length ? bottom + 160 : 0 })
-        : [{ x: center.cx - pages[0].width / 4, y: center.cy - pages[0].height / 4, width: pages[0].width / 2, height: pages[0].height / 2 }];
-    const pageOffset = frames.length;
+    const pageOffset = countPageFrames(api.getSceneElements(), t('board.page'));
     for (let i = 0; i < pages.length; i += 1) {
       if (kind === 'page') setProgress(t('board.adding', { n: i + 1, total: pages.length }));
       const { fileId, path } = await uploadBoardImage(lessonId, pages[i], kind, name);
@@ -253,14 +390,19 @@ export default function Board({
       api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: 'image/webp', created: Date.now() }]);
       void send({ t: 'file', fileId, path, mime: 'image/webp', width: pages[i].width, height: pages[i].height }).catch(() => {});
       const imageId = crypto.randomUUID();
-      const box = boxes[i];
-      const skeleton =
-        kind === 'page'
-          ? [
-              { type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId, locked: true },
-              { type: 'frame' as const, children: [imageId], name: t('board.page', { n: pageOffset + i + 1 }), x: box.x - 20, y: box.y - 20, width: box.width + 40, height: box.height + 40 },
-            ]
-          : [{ type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId }];
+      let skeleton;
+      if (kind === 'page') {
+        // Measured per page, so pages land below whatever is on the board now (including the other person's strokes).
+        const bottom = sceneBottom(api.getSceneElements());
+        const box = layoutPages([pages[i]], { x: 0, y: bottom === null ? 0 : bottom + (i === 0 ? FIRST_PAGE_GAP : NEXT_PAGE_GAP) })[0];
+        skeleton = [
+          { type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId, locked: true },
+          { type: 'frame' as const, children: [imageId], name: t('board.page', { n: pageOffset + i + 1 }), x: box.x - 20, y: box.y - 20, width: box.width + 40, height: box.height + 40 },
+        ];
+      } else {
+        const box = { x: center.cx - pages[0].width / 4, y: center.cy - pages[0].height / 4, width: pages[0].width / 2, height: pages[0].height / 2 };
+        skeleton = [{ type: 'image' as const, id: imageId, x: box.x, y: box.y, width: box.width, height: box.height, fileId: fileId as FileId }];
+      }
       const created = convertToExcalidrawElements(skeleton);
       api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...created], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
     }
@@ -273,7 +415,8 @@ export default function Board({
     try {
       if (check.kind === 'pdf') {
         setProgress(t('board.adding', { n: 1, total: 1 }));
-        await placePages(await renderPdf(file), 'page', file.name);
+        const pages = await renderPdf(file, (n, total) => setProgress(t('board.adding', { n, total })));
+        await placePages(pages, 'page', file.name);
       } else {
         setProgress(t('board.addingImage'));
         await placePages([await imageToWebp(file)], 'image', file.name);
@@ -288,7 +431,7 @@ export default function Board({
   const sortedFrames = [...frames].sort((a, b) => a.y - b.y);
 
   return (
-    <div data-testid="board" className="relative h-full w-full">
+    <div ref={rootRef} data-testid="board" className="relative h-full w-full">
       <Excalidraw
         excalidrawAPI={setApi}
         onChange={onChange}
@@ -325,10 +468,17 @@ export default function Board({
         </div>
       </div>
 
-      {(sortedFrames.length > 1 || (member.role === 'student' && !follow.following)) && (
+      {(sortedFrames.length > 1 || (isStudent && !follow.following)) && (
         <div className="absolute right-3 top-16 z-10 flex flex-col items-end gap-2">
-          {member.role === 'student' && !follow.following && (
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => dispatchFollow({ type: 'resume' })}>
+          {isStudent && !follow.following && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                dispatchFollow({ type: 'resume' });
+                void send({ t: 'viewport-req' }).catch(() => {});
+              }}
+            >
               {t('board.resume')}
             </button>
           )}
@@ -352,9 +502,6 @@ export default function Board({
     </div>
   );
 }
-
-type BoardSend = ReturnType<typeof useBoardChannel>['send'];
-type SaveQueue = ReturnType<typeof createSaveQueue>;
 
 function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {

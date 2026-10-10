@@ -19,7 +19,13 @@ export function pdfPagesError(pageCount: number): 'board.tooManyPages' | null {
   return pageCount > MAX_PAGES ? 'board.tooManyPages' : null;
 }
 
-export type RenderedPage = { blob: Blob; width: number; height: number };
+/** A storage path inside this lesson's folder (peer `file` messages must not point elsewhere). */
+export function isLessonPath(lessonId: string, path: string): boolean {
+  const prefix = `${lessonId}/`;
+  return path.startsWith(prefix) && path.length > prefix.length && !path.split('/').includes('..');
+}
+
+export type RenderedPage ={ blob: Blob; width: number; height: number };
 
 export async function uploadBoardImage(
   lessonId: string,

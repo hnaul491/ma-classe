@@ -8,6 +8,7 @@ export type BoardElement = { id: string; version: number; versionNonce: number; 
 export type BoardMessage =
   | { t: 'elements'; elements: BoardElement[] }
   | { t: 'scene-req' }
+  | { t: 'viewport-req' }
   | { t: 'file'; fileId: string; path: string; mime: string; width: number; height: number }
   | { t: 'viewport'; cx: number; cy: number; zoom: number }
   | { t: 'pointer'; x: number; y: number; tool: 'pointer' | 'laser'; button: 'up' | 'down' };
@@ -20,7 +21,7 @@ export function encodeBoard(msg: BoardMessage): string {
 
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
-function isElement(e: unknown): e is BoardElement {
+export function isBoardElement(e: unknown): e is BoardElement {
   if (typeof e !== 'object' || e === null) return false;
   const o = e as Record<string, unknown>;
   return typeof o.id === 'string' && Number.isInteger(o.version) && Number.isInteger(o.versionNonce);
@@ -38,9 +39,11 @@ export function decodeBoard(text: string): BoardMessage | null {
   if (m.v !== 1) return null;
   switch (m.t) {
     case 'elements':
-      return Array.isArray(m.elements) && m.elements.every(isElement) ? { t: 'elements', elements: m.elements } : null;
+      return Array.isArray(m.elements) && m.elements.every(isBoardElement) ? { t: 'elements', elements: m.elements } : null;
     case 'scene-req':
       return { t: 'scene-req' };
+    case 'viewport-req':
+      return { t: 'viewport-req' };
     case 'file':
       return typeof m.fileId === 'string' &&
         typeof m.path === 'string' &&

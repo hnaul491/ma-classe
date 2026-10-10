@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkUpload, MAX_BYTES, pdfPagesError } from './upload';
+import { checkUpload, isLessonPath, MAX_BYTES, pdfPagesError } from './upload';
 
 describe('checkUpload', () => {
   it('accepts PDFs and PNG/JPG/WebP images', () => {
@@ -23,5 +23,15 @@ describe('pdfPagesError', () => {
   it('allows up to 50 pages', () => {
     expect(pdfPagesError(50)).toBeNull();
     expect(pdfPagesError(51)).toBe('board.tooManyPages');
+  });
+});
+
+describe('isLessonPath', () => {
+  it('accepts only files inside this lesson folder', () => {
+    expect(isLessonPath('L1', 'L1/abc.webp')).toBe(true);
+    expect(isLessonPath('L1', 'L2/abc.webp')).toBe(false);
+    expect(isLessonPath('L1', 'L1abc.webp')).toBe(false);
+    expect(isLessonPath('L1', 'L1/../L2/abc.webp')).toBe(false);
+    expect(isLessonPath('L1', 'L1/')).toBe(false);
   });
 });
