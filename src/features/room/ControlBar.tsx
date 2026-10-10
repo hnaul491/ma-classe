@@ -99,7 +99,7 @@ export function ControlBar({
         title={endLabel}
         aria-label={endLabel}
         onClick={onEndClick}
-        className={`flex h-9 items-center justify-center gap-1.5 rounded-full bg-pen px-3 text-surface ${confirmEnd ? 'ring-2 ring-pen ring-offset-2 ring-offset-surface' : ''}`}
+        className={`flex h-9 items-center justify-center gap-1.5 rounded-full bg-pen px-3 text-surface transition-colors hover:bg-[color-mix(in_srgb,var(--pen)_86%,var(--ink))] ${confirmEnd ? 'ring-2 ring-pen ring-offset-2 ring-offset-surface' : ''}`}
       >
         <EndIcon />
         {confirmEnd && <span className="text-xs font-semibold">{t('bar.clickAgain')}</span>}

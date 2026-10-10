@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+/* Palette: paper, ink, the teacher's red pen, highlighter, classroom blue. */
 :root {
   --paper: #f3f5f8;
   --surface: #ffffff;
@@ -52,9 +53,163 @@
   --color-good-soft: var(--good-soft);
   --color-blue: var(--blue);
   --color-blue-soft: var(--blue-soft);
+
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-display: var(--font-bricolage), var(--font-plex), ui-sans-serif, system-ui, sans-serif;
 }
 
-body {
-  background: var(--paper);
-  color: var(--ink);
+@layer base {
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    /* @theme inline does not override the root --font-sans, so name the faces directly. */
+    font-family: var(--font-plex), ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-bricolage), var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  /* Tailwind v4 resets buttons to the default arrow cursor; anything clickable shows a hand. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select:not(:disabled),
+  summary,
+  label:has(> select),
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--hl);
+    color: var(--hl-ink);
+  }
+}
+
+@layer components {
+  /* One button family: same height, radius, weight and states everywhere. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0 1.125rem;
+    border-radius: 0.625rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+  .btn:disabled {
+    opacity: 0.6;
+  }
+
+  .btn-primary {
+    background: var(--blue);
+    color: var(--surface);
+  }
+  .btn-primary:not(:disabled):hover {
+    background: color-mix(in srgb, var(--blue) 86%, var(--ink));
+  }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .btn-secondary:not(:disabled):hover {
+    background: var(--surface-2);
+  }
+
+  .btn-danger {
+    background: var(--pen);
+    color: var(--surface);
+  }
+  .btn-danger:not(:disabled):hover {
+    background: color-mix(in srgb, var(--pen) 86%, var(--ink));
+  }
+
+  .btn-sm {
+    min-height: 2rem;
+    padding: 0 0.75rem;
+    font-size: 0.8125rem;
+    border-radius: 0.5rem;
+  }
+
+  /* Inputs and selects share one shape with the buttons. */
+  .field {
+    width: 100%;
+    min-height: 2.5rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.625rem;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 0.9375rem;
+    transition: border-color 120ms ease;
+  }
+  .field:hover {
+    border-color: color-mix(in srgb, var(--line) 50%, var(--muted));
+  }
+  .field:focus-visible {
+    border-color: var(--blue);
+    outline-offset: 0;
+  }
+
+  .field-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .link {
+    color: var(--blue);
+    font-weight: 500;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+  .link:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 0.875rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
 }

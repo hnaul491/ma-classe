@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
+import { Wordmark } from '@/components/Wordmark';
 import { getMember } from '@/lib/auth/session';
 import { formatLessonDate } from '@/lib/i18n/messages';
 import { getLocale, getT, getTimeZone } from '@/lib/i18n/server';
@@ -36,51 +37,63 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const past = lessons.filter((l) => l.status === 'ended');
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
-      <header className="flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold">Ma Classe</h1>
+    <main className="mx-auto flex w-full max-w-2xl flex-col gap-10 px-4 py-10">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <h1>
+          <Wordmark />
+        </h1>
         <div className="flex items-center gap-3">
-          <LanguageSwitch />
-          <span className="rounded bg-surface-2 px-2 py-1 text-xs uppercase tracking-wide text-muted">
+          <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-medium text-muted">
             {t(member.role === 'teacher' ? 'role.teacher' : 'role.student')}
           </span>
+          <LanguageSwitch />
         </div>
       </header>
 
-      {sp.ended && <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">{t('home.ended')}</p>}
+      {sp.ended && (
+        <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">
+          {t('home.ended')}
+        </p>
+      )}
 
-      <section className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-5">
-        {live ? (
-          <>
-            <p className="font-semibold">{t('home.inProgress', { title: t('lesson.title', { date: formatLessonDate(live.started_at, locale, timeZone) }) })}</p>
-            <Link href={`/lesson/${live.id}`} className="self-start rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
-              {t('home.joinLesson')}
-            </Link>
-          </>
+      {live ? (
+        <section className="card flex flex-col gap-4 border-blue bg-blue-soft p-6">
+          <p className="flex items-center gap-2 font-display text-xl font-bold">
+            <span className="size-2.5 rounded-full bg-pen motion-safe:animate-pulse" aria-hidden />
+            {t('home.inProgress', { title: t('lesson.title', { date: formatLessonDate(live.started_at, locale, timeZone) }) })}
+          </p>
+          <Link href={`/lesson/${live.id}`} className="btn btn-primary self-start">
+            {t('home.joinLesson')}
+          </Link>
+        </section>
+      ) : (
+        <section className="card flex flex-col items-start gap-4 p-6">
+          <p className="max-w-prose text-muted">{t('home.noLive')}</p>
+          <form action={startLesson}>
+            <button type="submit" className="btn btn-primary">
+              {t('home.startLesson')}
+            </button>
+          </form>
+          <LivePoller />
+        </section>
+      )}
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-xl font-bold">{t('home.pastLessons')}</h2>
+        {past.length === 0 ? (
+          <p className="text-muted">{t('home.noLessons')}</p>
         ) : (
-          <>
-            <p className="text-muted">{t('home.noLive')}</p>
-            <form action={startLesson}>
-              <button type="submit" className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
-                {t('home.startLesson')}
-              </button>
-            </form>
-            <LivePoller />
-          </>
+          <ul className="card flex flex-col divide-y divide-line">
+            {past.map((l) => (
+              <li key={l.id} className="flex items-baseline justify-between gap-4 px-5 py-3.5">
+                <span className="font-medium">{t('lesson.title', { date: formatLessonDate(l.started_at, locale, timeZone) })}</span>
+                <span className="text-sm tabular-nums text-muted">
+                  {t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold">{t('home.pastLessons')}</h2>
-        {past.length === 0 && <p className="text-muted">{t('home.noLessons')}</p>}
-        <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
-          {past.map((l) => (
-            <li key={l.id} className="flex justify-between gap-4 px-4 py-3">
-              <span>{t('lesson.title', { date: formatLessonDate(l.started_at, locale, timeZone) })}</span>
-              <span className="text-sm tabular-nums text-muted">{t('home.minutes', { n: minutesBetween(l.started_at, l.ended_at) ?? '–' })}</span>
-            </li>
-          ))}
-        </ul>
       </section>
     </main>
   );

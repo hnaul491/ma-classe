@@ -12,12 +12,12 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
   }, [error]);
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4">
-      <p className="text-lg">{t('error.title')}</p>
-      <button type="button" onClick={() => retry()} className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 px-4 text-center">
+      <h1 className="text-2xl font-bold">{t('error.title')}</h1>
+      <button type="button" onClick={() => retry()} className="btn btn-primary">
         {t('error.retry')}
       </button>
-      <Link href="/" className="text-blue underline">
+      <Link href="/" className="link">
         {t('lesson.backHome')}
       </Link>
     </main>

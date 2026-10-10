@@ -15,7 +15,7 @@ export function FloatingCams() {
       <button
         type="button"
         onClick={() => setHidden(false)}
-        className="fixed right-4 top-16 z-20 rounded-full bg-surface px-3 py-1 text-xs shadow"
+        className="fixed right-4 top-16 z-20 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium shadow hover:bg-surface-2"
       >
         {t('cams.show')}
       </button>
@@ -43,7 +43,7 @@ export function FloatingCams() {
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => setHidden(true)}
-        className="w-full pb-1 text-center text-xs text-muted"
+        className="w-full pb-1.5 text-center text-xs text-muted hover:text-ink"
       >
         {t('cams.hide')}
       </button>

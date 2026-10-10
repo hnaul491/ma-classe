@@ -21,9 +21,9 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
 
   if (lesson.status !== 'live') {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4">
-        <p className="text-lg">{t('lesson.ended')}</p>
-        <Link href="/" className="text-blue underline">
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-5 px-4 text-center">
+        <h1 className="text-2xl font-bold">{t('lesson.ended')}</h1>
+        <Link href="/" className="btn btn-secondary">
           {t('lesson.backHome')}
         </Link>
       </main>

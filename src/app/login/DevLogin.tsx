@@ -23,17 +23,17 @@ export function DevLogin() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="flex w-72 flex-col gap-2 rounded-lg border border-dashed border-line p-4">
+    <form onSubmit={onSubmit} className="flex w-full flex-col gap-3 rounded-xl border border-dashed border-line p-4 text-left">
       <p className="text-xs text-muted">{t('login.devOnly')}</p>
-      <label className="flex flex-col text-sm">
+      <label className="field-label">
         {t('login.email')}
-        <input id="dev-email" name="email" type="email" className="rounded border border-line bg-surface px-2 py-1" />
+        <input id="dev-email" name="email" type="email" className="field" />
       </label>
-      <label className="flex flex-col text-sm">
+      <label className="field-label">
         {t('login.password')}
-        <input id="dev-password" name="password" type="password" className="rounded border border-line bg-surface px-2 py-1" />
+        <input id="dev-password" name="password" type="password" className="field" />
       </label>
-      <button type="submit" className="rounded bg-surface-2 px-3 py-1.5 text-sm">
+      <button type="submit" className="btn btn-secondary">
         {t('login.withPassword')}
       </button>
       {error && <p className="text-sm text-pen">{error}</p>}

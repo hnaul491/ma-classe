@@ -2,6 +2,7 @@ export type Locale = 'en' | 'fr';
 
 export const en = {
   'lang.label': 'Language',
+  'login.tagline': 'Your private French classroom.',
   'login.private': 'This classroom is private.',
   'login.failed': 'Sign-in failed. Try again.',
   'login.google': 'Sign in with Google',
@@ -91,6 +92,7 @@ export type MessageKey = keyof typeof en;
 
 export const fr: Record<MessageKey, string> = {
   'lang.label': 'Langue',
+  'login.tagline': 'Votre classe de français privée.',
   'login.private': 'Cette classe est privée.',
   'login.failed': 'La connexion a échoué. Réessayez.',
   'login.google': 'Se connecter avec Google',

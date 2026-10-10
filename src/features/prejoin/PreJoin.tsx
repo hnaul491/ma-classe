@@ -2,10 +2,23 @@
 
 import { useMediaDevices, usePreviewTracks } from '@livekit/components-react';
 import { Track, VideoPresets, type LocalAudioTrack, type LocalVideoTrack } from 'livekit-client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { Role } from '@/lib/lessons/types';
 import { playTestSound, useMicLevel } from './audio';
+
+/** Own component so the 60 fps level updates re-render only the meter, not the whole screen. */
+function MicMeter({ track, label }: { track?: MediaStreamTrack; label: string }) {
+  const level = useMicLevel(track);
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <span className="w-28 shrink-0 font-medium">{label}</span>
+      <span className="h-2 flex-1 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+        <span className="block h-full rounded-full bg-good transition-[width] duration-75" style={{ width: `${Math.round(Math.min(1, level * 3) * 100)}%` }} />
+      </span>
+    </div>
+  );
+}
 import { usePresence } from './usePresence';
 
 export interface JoinChoices {
@@ -43,7 +56,9 @@ export function PreJoin({
     }),
     [audioDeviceId, videoDeviceId],
   );
-  const tracks = usePreviewTracks(options, (e) => setDeviceError(e.message));
+  // usePreviewTracks restarts the camera and mic whenever this callback changes, so it must be stable.
+  const onPreviewError = useCallback((e: Error) => setDeviceError(e.message), []);
+  const tracks = usePreviewTracks(options, onPreviewError);
   const videoTrack = tracks?.find((tr) => tr.kind === Track.Kind.Video) as LocalVideoTrack | undefined;
   const audioTrack = tracks?.find((tr) => tr.kind === Track.Kind.Audio) as LocalAudioTrack | undefined;
 
@@ -57,7 +72,6 @@ export function PreJoin({
     };
   }, [videoTrack]);
 
-  const level = useMicLevel(audioTrack?.mediaStreamTrack);
   const cams = useMediaDevices({ kind: 'videoinput' });
   const mics = useMediaDevices({ kind: 'audioinput' });
   const speakers = useMediaDevices({ kind: 'audiooutput' });
@@ -80,8 +94,8 @@ export function PreJoin({
   }
 
   return (
-    <main className="mx-auto grid min-h-dvh max-w-4xl items-center gap-6 px-4 py-8 md:grid-cols-[1.2fr_1fr]">
-      <div className="aspect-[4/3] w-full overflow-hidden rounded-xl bg-surface-2">
+    <main className="mx-auto grid min-h-dvh w-full max-w-4xl items-center gap-8 px-4 py-10 md:grid-cols-[1.2fr_1fr]">
+      <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl border border-line bg-surface-2">
         {videoTrack ? (
           <video ref={videoEl} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
         ) : (
@@ -90,11 +104,11 @@ export function PreJoin({
       </div>
 
       <div className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="field-label">
           {t('prejoin.camera')}
           <select
             id="prejoin-camera"
-            className="rounded border border-line bg-surface px-2 py-1.5"
+            className="field"
             value={videoDeviceId ?? ''}
             onChange={(e) => {
               setDeviceError(null);
@@ -110,11 +124,11 @@ export function PreJoin({
           </select>
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="field-label">
           {t('prejoin.mic')}
           <select
             id="prejoin-mic"
-            className="rounded border border-line bg-surface px-2 py-1.5"
+            className="field"
             value={audioDeviceId ?? ''}
             onChange={(e) => {
               setDeviceError(null);
@@ -130,19 +144,14 @@ export function PreJoin({
           </select>
         </label>
 
-        <div className="flex items-center gap-3 text-sm">
-          <span className="w-24 text-muted">{t('prejoin.micLevel')}</span>
-          <span className="h-2 flex-1 overflow-hidden rounded bg-surface-2" aria-hidden>
-            <span className="block h-full bg-good" style={{ width: `${Math.round(Math.min(1, level * 3) * 100)}%` }} />
-          </span>
-        </div>
+        <MicMeter track={audioTrack?.mediaStreamTrack} label={t('prejoin.micLevel')} />
 
         {speakers.length > 0 && (
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="field-label">
             {t('prejoin.speaker')}
             <select
               id="prejoin-speaker"
-              className="rounded border border-line bg-surface px-2 py-1.5"
+              className="field"
               value={audioOutputId ?? ''}
               onChange={(e) => setAudioOutputId(e.target.value || undefined)}
             >
@@ -159,26 +168,27 @@ export function PreJoin({
         <button
           type="button"
           onClick={() => playTestSound(audioOutputId)}
-          className="self-start rounded bg-surface-2 px-3 py-1.5 text-sm"
+          className="btn btn-secondary btn-sm self-start"
         >
           {t('prejoin.testSound')}
         </button>
 
-        <p className={otherIn ? 'text-good' : 'text-muted'}>
+        <p className={`flex items-center gap-2 text-sm ${otherIn ? 'text-good' : 'text-muted'}`}>
+          <span className={`size-2 rounded-full ${otherIn ? 'bg-good' : 'bg-line'}`} aria-hidden />
           {role === 'student'
             ? t(otherIn ? 'prejoin.teacherIn' : 'prejoin.teacherNotIn')
             : t(otherIn ? 'prejoin.studentIn' : 'prejoin.studentNotIn')}
         </p>
 
         {deviceError && (
-          <p className="text-sm text-pen">
+          <p role="alert" className="rounded-lg bg-pen-soft px-3 py-2 text-sm text-pen">
             {t('prejoin.deviceProblem', { error: deviceError })}
           </p>
         )}
         {error && (
-          <p className="text-sm text-pen">
+          <p role="alert" className="rounded-lg bg-pen-soft px-3 py-2 text-sm text-pen">
             {error}{' '}
-            <a href={planBUrl} target="_blank" rel="noopener" className="underline">
+            <a href={planBUrl} target="_blank" rel="noopener" className="font-semibold underline underline-offset-2">
               {t('common.openPlanB')}
             </a>
           </p>
@@ -188,7 +198,7 @@ export function PreJoin({
           type="button"
           onClick={join}
           disabled={joining}
-          className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface disabled:opacity-60"
+          className="btn btn-primary w-full"
         >
           {joining ? t('prejoin.joining') : t('home.joinLesson')}
         </button>

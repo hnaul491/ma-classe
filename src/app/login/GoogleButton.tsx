@@ -14,7 +14,7 @@ export function GoogleButton({ signOutFirst }: { signOutFirst: boolean }) {
   return (
     <button
       type="button"
-      className="rounded-lg bg-blue px-5 py-2.5 font-semibold text-surface"
+      className="btn btn-primary w-full"
       onClick={() =>
         createBrowserSupabase().auth.signInWithOAuth({
           provider: 'google',

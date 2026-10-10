@@ -19,7 +19,7 @@ export function ScreenView({ onStop }: { onStop: () => void }) {
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between gap-3 bg-blue-soft px-4 py-2 text-sm text-blue">
           <span>{wholeScreen ? t('screen.youEntire') : t('screen.you')}</span>
-          <button type="button" onClick={onStop} className="rounded bg-blue px-3 py-1 font-semibold text-surface">
+          <button type="button" onClick={onStop} className="btn btn-primary btn-sm">
             {t('bar.stopShare')}
           </button>
         </div>

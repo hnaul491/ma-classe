@@ -24,7 +24,7 @@ export function LanguageSwitch() {
   }
 
   return (
-    <div role="group" aria-label={t('lang.label')} className="flex gap-1 text-xs">
+    <div role="group" aria-label={t('lang.label')} className="inline-flex rounded-lg border border-line bg-surface p-0.5 text-sm">
       {OPTIONS.map((o) => (
         <button
           key={o.value}
@@ -32,7 +32,7 @@ export function LanguageSwitch() {
           lang={o.value}
           aria-pressed={locale === o.value}
           onClick={() => choose(o.value)}
-          className={`rounded px-2 py-1 ${locale === o.value ? 'bg-ink text-paper' : 'bg-surface-2 text-ink'}`}
+          className={`min-h-8 rounded-md px-3 font-medium transition-colors ${locale === o.value ? 'bg-ink text-paper' : 'text-muted hover:bg-surface-2 hover:text-ink'}`}
         >
           {o.label}
         </button>
