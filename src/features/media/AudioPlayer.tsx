@@ -6,6 +6,7 @@ import { getDriveToken } from '@/features/drive/token';
 import { useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
 import { audioLoadProblem } from './audioError';
+import { loadObjectUrl } from './objectUrl';
 import { isAutoplayRejection, type Observed, type PlayerControl } from './playback';
 import type { MediaSource } from './protocol';
 
@@ -22,12 +23,15 @@ export function AudioPlayer({
   source,
   onControl,
   onObserved,
+  onPlaying,
   onError,
 }: {
   source: AudioSource;
   /** The player's controls once the audio is ready; null when it goes away. */
   onControl: (c: PlayerControl | null) => void;
   onObserved: (o: Observed) => void;
+  /** Playback really started (the browser's `playing`): an autoplay mark is stale. */
+  onPlaying: () => void;
   onError: (key: MessageKey) => void;
 }) {
   const t = useT();
@@ -40,24 +44,15 @@ export function AudioPlayer({
   const url = current && 'url' in current ? current.url : null;
   const control = useEffectEvent(onControl);
 
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    downloadDriveFile({ id: source.driveId, name: source.name, mimeType: source.mimeType, sizeBytes: null }).then(
-      (file) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(file);
-        setLoaded({ key, url: objectUrl });
-      },
-      (e: unknown) => {
-        if (!cancelled) setLoaded({ key, problem: audioLoadProblem(e) });
-      },
-    );
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [key, source.driveId, source.name, source.mimeType]);
+  useEffect(
+    () =>
+      loadObjectUrl(
+        () => downloadDriveFile({ id: source.driveId, name: source.name, mimeType: source.mimeType, sizeBytes: null }),
+        { create: (b) => URL.createObjectURL(b), revoke: (u) => URL.revokeObjectURL(u) },
+        (r) => setLoaded('url' in r ? { key, url: r.url } : { key, problem: audioLoadProblem(r.error) }),
+      ),
+    [key, source.driveId, source.name, source.mimeType],
+  );
 
   // The controls belong to this URL's element: gone with it.
   useEffect(() => {
@@ -128,6 +123,7 @@ export function AudioPlayer({
             });
           }}
           onPlay={(e) => observe(e.currentTarget, true)}
+          onPlaying={() => onPlaying()}
           onPause={(e) => observe(e.currentTarget, false)}
           onSeeked={(e) => observe(e.currentTarget, !e.currentTarget.paused)}
           onError={() => setLoaded({ key, problem: 'failed' })}

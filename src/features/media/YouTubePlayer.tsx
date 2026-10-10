@@ -18,17 +18,21 @@ export function YouTubePlayer({
   videoId,
   onControl,
   onObserved,
+  onPlaying,
   onError,
 }: {
   videoId: string;
   /** The player's controls once it is ready; null when it goes away. */
   onControl: (c: PlayerControl | null) => void;
   onObserved: (o: Observed) => void;
+  /** The player reached PLAYING (even late, after a slow buffer): an autoplay mark is stale. */
+  onPlaying: () => void;
   onError: (key: 'media.failed' | 'media.notEmbeddable') => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const control = useEffectEvent(onControl);
   const observed = useEffectEvent(onObserved);
+  const nowPlaying = useEffectEvent(onPlaying);
   const failed = useEffectEvent(onError);
 
   useEffect(() => {
@@ -109,6 +113,8 @@ export function YouTubePlayer({
               for (const check of [...pending]) check();
               const o = ytObserved(e.data, time());
               if (o) observed(o);
+              // After the event above, so a late autoplay is not mistaken for the person's play.
+              if (e.data === YT_PLAYING) nowPlaying();
             },
             onError: (e) => failed(NOT_EMBEDDABLE.includes(e.data) ? 'media.notEmbeddable' : 'media.failed'),
           },

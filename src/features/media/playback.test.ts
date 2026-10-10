@@ -5,10 +5,12 @@ import {
   AUTOPLAY_TIMEOUT_MS,
   autoplayVerdict,
   createEchoGuard,
+  routeMessage,
   ECHO_GUARD_MS,
   isAutoplayRejection,
   isLocalChange,
   isSeekJump,
+  missedAction,
   SEEK_JUMP_S,
   SEEK_MAX_GAP_MS,
   shouldHeartbeat,
@@ -248,5 +250,95 @@ describe('isAutoplayRejection', () => {
     expect(isAutoplayRejection(new DOMException('interrupted', 'AbortError'))).toBe(false);
     expect(isAutoplayRejection(new Error('x'))).toBe(false);
     expect(isAutoplayRejection(undefined)).toBe(false);
+  });
+});
+
+describe('createEchoGuard.remaining', () => {
+  it('says how long until the window ends, so a swallowed action can be checked then', () => {
+    const c = clock();
+    const g = createEchoGuard(c.now);
+    expect(g.remaining()).toBe(0);
+    g.begin();
+    c.advance(200);
+    expect(g.remaining()).toBe(ECHO_GUARD_MS - 200);
+    const release = g.hold();
+    expect(g.remaining()).toBe(Infinity);
+    release();
+    expect(g.remaining()).toBe(ECHO_GUARD_MS);
+    c.advance(ECHO_GUARD_MS);
+    expect(g.remaining()).toBe(0);
+  });
+});
+
+describe('routeMessage', () => {
+  const ctx = { self: 'teacher' as const, position: 31.5, now: 2000 };
+  const mine: MediaState = { source: yt, playing: true, position: 30, sentAt: 500, lamport: 6, by: 'teacher' };
+  const other: MediaSource = { kind: 'youtube', videoId: 'aaaaaaaaaaa' };
+  const stateMsg = (o: Partial<MediaState>) => ({ t: 'media-state' as const, ...mine, by: 'teacher' as const, ...o }) as Extract<
+    import('./protocol').MediaMessage,
+    { t: 'media-state' }
+  >;
+
+  it('answers media-req to the asker only, with the live position', () => {
+    const r = routeMessage(mine, { t: 'media-req' }, 'student@x', ctx);
+    expect(r.next).toBe(mine);
+    expect(r.reply).toEqual({ to: ['student@x'], msg: { ...stateMsg({ position: 31.5, sentAt: 2000 }) } });
+    expect(r.syncPlayer).toBe(false);
+  });
+
+  it('does not answer media-req before anyone acted', () => {
+    const initial: MediaState = { source: null, playing: false, position: 0, sentAt: 0, lamport: 0, by: null };
+    expect(routeMessage(initial, { t: 'media-req' }, 'student@x', ctx).reply).toBeNull();
+  });
+
+  it('adopts a newer state; the same media syncs the player now, a new one waits for its player', () => {
+    const same = routeMessage(mine, stateMsg({ lamport: 7, by: 'student', playing: false }), 'student@x', ctx);
+    expect(same.next.lamport).toBe(7);
+    expect(same.reply).toBeNull();
+    expect(same.syncPlayer).toBe(true);
+    const fresh = routeMessage(mine, stateMsg({ lamport: 7, by: 'student', source: other }), 'student@x', ctx);
+    expect(fresh.next.source).toEqual(other);
+    expect(fresh.syncPlayer).toBe(false);
+  });
+
+  it('answers a stale state with mine, to its sender', () => {
+    const r = routeMessage(mine, stateMsg({ lamport: 2, by: 'student' }), 'student@x', ctx);
+    expect(r.next).toBe(mine);
+    expect(r.reply?.to).toEqual(['student@x']);
+    expect(r.reply?.msg).toMatchObject({ t: 'media-state', lamport: 6, by: 'teacher', position: 31.5 });
+  });
+
+  it('an equal state changes nothing and gets no answer', () => {
+    const r = routeMessage(mine, stateMsg({}), 'student@x', ctx);
+    expect(r).toEqual({ next: mine, reply: null, syncPlayer: false });
+  });
+
+  it('media-load changes nothing (its media-state follows)', () => {
+    expect(routeMessage(mine, { t: 'media-load', source: other, at: 1 }, 'student@x', ctx)).toEqual({ next: mine, reply: null, syncPlayer: false });
+  });
+});
+
+describe('missedAction', () => {
+  it('a play pressed inside the window after a remote pause is caught when the window ends', () => {
+    const c = clock(1000);
+    const g = createEchoGuard(c.now);
+    g.begin(); // the remote pause is applied
+    c.advance(200); // the person presses play: the event is swallowed
+    expect(g.active()).toBe(true);
+    c.advance(g.remaining());
+    expect(missedAction(paused, { playing: true, position: 10.2 }, c.now(), false)).toEqual({ playing: true, position: 10.2 });
+  });
+
+  it('a seek beyond the threshold inside the window is caught too', () => {
+    expect(missedAction(paused, { playing: false, position: 55 }, 1000, false)).toEqual({ playing: false, position: 55 });
+  });
+
+  it('nothing is missed when the player matches the synced state', () => {
+    expect(missedAction(paused, { playing: false, position: 10 }, 1000, false)).toBeNull();
+    expect(missedAction(playing, { playing: true, position: 12 }, 3000, false)).toBeNull();
+  });
+
+  it('a blocked player (autoplay) has no missed action: it is not the person’s doing', () => {
+    expect(missedAction(playing, { playing: false, position: 0 }, 3000, true)).toBeNull();
   });
 });

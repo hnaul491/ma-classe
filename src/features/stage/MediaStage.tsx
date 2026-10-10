@@ -7,7 +7,18 @@ import { AUDIO_MIMES, classifyDriveFile, type DriveFile } from '@/features/drive
 import { driveErrorKey, openDrivePicker } from '@/features/drive/drive';
 import { preloadDriveAuth } from '@/features/drive/token';
 import { AudioPlayer } from '@/features/media/AudioPlayer';
-import { applyPlan, createEchoGuard, isLocalChange, shouldHeartbeat, stateMessage, type Observed, type PlayerControl } from '@/features/media/playback';
+import {
+  applyPlan,
+  createEchoGuard,
+  isLocalChange,
+  missedAction,
+  routeMessage,
+  shouldHeartbeat,
+  sourceKey,
+  stateMessage,
+  type Observed,
+  type PlayerControl,
+} from '@/features/media/playback';
 import { parseYouTubeId, type MediaMessage, type MediaSource } from '@/features/media/protocol';
 import { HEARTBEAT_MS, INITIAL_MEDIA_STATE, mediaReducer, targetPosition, type MediaState } from '@/features/media/sync';
 import { useMediaChannel } from '@/features/media/useMediaChannel';
@@ -26,12 +37,6 @@ export type MediaHandle = {
   /** An audio file picked on the board's Drive menu: play it here, for both. */
   openAudio: (f: DriveFile) => void;
 };
-
-/** One key per media, so a new one mounts a new player. */
-function sourceKey(s: MediaSource | null): string | null {
-  if (!s) return null;
-  return s.kind === 'youtube' ? `yt:${s.videoId}` : `audio:${s.driveId}`;
-}
 
 export default function MediaStage({
   member,
@@ -90,26 +95,15 @@ export default function MediaStage({
   };
 
   const { send } = useMediaChannel((msg: MediaMessage, from: string) => {
-    switch (msg.t) {
-      case 'media-state': {
-        const prev = stateRef.current;
-        const next = mediaReducer(prev, { type: 'remote', msg });
-        if (next === prev) return;
-        commit(next);
-        if (!next.playing) block(null);
-        // A new media mounts a new player, which syncs when ready.
-        if (sourceKey(next.source) === sourceKey(prev.source)) syncPlayer();
-        return;
-      }
-      case 'media-req': {
-        const reply = stateMessage(stateRef.current, livePosition(), Date.now());
-        if (reply) void send(reply, { to: [from] }).catch(() => {});
-        return;
-      }
-      case 'media-load':
-        // The media-state that follows carries everything.
-        return;
-    }
+    const prev = stateRef.current;
+    const r = routeMessage(prev, msg, from, { self: role, position: livePosition(), now: Date.now() });
+    // A media-req answer, or my state for someone whose state is stale.
+    if (r.reply) void send(r.reply.msg, { to: r.reply.to }).catch(() => {});
+    if (r.next === prev) return;
+    commit(r.next);
+    if (!r.next.playing) block(null);
+    // A new media mounts a new player, which syncs when ready.
+    if (r.syncPlayer) syncPlayer();
   });
 
   /** Makes the player match the shared state; its own events meanwhile are not actions. */
@@ -169,22 +163,56 @@ export default function MediaStage({
     }
   };
 
+  /** A check queued for when the echo guard ends. */
+  const recheck = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** When the guard ends, an action swallowed inside it (a play right after a remote pause) is caught. */
+  function checkAfterGuard() {
+    if (recheck.current) return;
+    const left = guard.remaining();
+    recheck.current = setTimeout(
+      () => {
+        recheck.current = null;
+        if (guard.active()) return checkAfterGuard();
+        const c = player();
+        const s = stateRef.current;
+        if (!c || !s.source) return;
+        const missed = missedAction(s, { playing: c.playing(), position: c.position() }, Date.now(), blockedRef.current === sourceKey(s.source));
+        if (missed) act({ source: s.source, ...missed });
+      },
+      // While a play is pending, look again shortly; otherwise just after the window.
+      left === Infinity ? 250 : left + 20,
+    );
+  }
+  useEffect(() => () => clearTimeout(recheck.current ?? undefined), []);
+
   const onObserved = (o: Observed) => {
     const s = stateRef.current;
-    if (guard.active() || blockedRef.current === sourceKey(s.source)) return;
+    if (blockedRef.current === sourceKey(s.source)) return;
+    if (guard.active()) return checkAfterGuard();
     if (!isLocalChange(s, o, Date.now())) return;
     act({ source: s.source, playing: o.playing, position: o.position });
   };
 
-  // Late join and reload: ask for the current media on mount, once connected, and when the other
-  // person joins (the first request may have gone out before anyone could answer).
+  /** Playback really started: a stale "blocked" mark (a slow buffer, not autoplay) goes, and the player catches up. */
+  const onPlaying = () => {
+    const k = sourceKey(stateRef.current.source);
+    if (k === null || blockedRef.current !== k) return;
+    block(null);
+    syncPlayer();
+  };
+
+  // Late join, reload and reconnect: ask for the current media on mount, once connected, after a
+  // reconnect (messages may have been lost meanwhile), and when the other person joins (the first request may have gone out before anyone could answer).
   useEffect(() => {
     const ask = () => void send({ t: 'media-req' }).catch(() => {});
     ask();
     room.on(RoomEvent.Connected, ask);
+    room.on(RoomEvent.Reconnected, ask);
     room.on(RoomEvent.ParticipantConnected, ask);
     return () => {
       room.off(RoomEvent.Connected, ask);
+      room.off(RoomEvent.Reconnected, ask);
       room.off(RoomEvent.ParticipantConnected, ask);
     };
   }, [room, send]);
@@ -319,11 +347,19 @@ export default function MediaStage({
                   videoId={source.videoId}
                   onControl={onControl(key!)}
                   onObserved={onObserved}
+                  onPlaying={onPlaying}
                   onError={onError}
                 />
               </div>
             ) : (
-              <AudioPlayer key={key} source={source} onControl={onControl(key!)} onObserved={onObserved} onError={onError} />
+              <AudioPlayer
+                key={key}
+                source={source}
+                onControl={onControl(key!)}
+                onObserved={onObserved}
+                onPlaying={onPlaying}
+                onError={onError}
+              />
             )}
             {blocked && (
               <button

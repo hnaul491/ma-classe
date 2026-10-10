@@ -2,8 +2,8 @@
 // player for a state, when autoplay counts as blocked, and what is a seek. No React, no browser.
 
 import type { Role } from '@/lib/lessons/types';
-import type { MediaMessage } from './protocol';
-import { needsCorrection, targetPosition, type MediaState } from './sync';
+import type { MediaMessage, MediaSource } from './protocol';
+import { needsCorrection, receiveState, targetPosition, type MediaState } from './sync';
 
 /** Player events this soon after applying a remote state are its echo, not the person's action. */
 export const ECHO_GUARD_MS = 500;
@@ -31,6 +31,8 @@ export function createEchoGuard(now: () => number = Date.now) {
       };
     },
     active: (): boolean => holds > 0 || now() < until,
+    /** Milliseconds until the window ends: Infinity while held, 0 once over. */
+    remaining: (): number => (holds > 0 ? Infinity : Math.max(0, until - now())),
   };
 }
 
@@ -141,3 +143,55 @@ export type PlayerControl = {
   pause(): void;
   seek(seconds: number): void;
 };
+
+export type Routed = {
+  next: MediaState;
+  /** A message for one person only (`to`): a media-req answer, or my state for a stale sender. */
+  reply: { to: string[]; msg: Extract<MediaMessage, { t: 'media-state' }> } | null;
+  /** The state changed for the media already playing: make its player match now. */
+  syncPlayer: boolean;
+};
+
+/**
+ * What the media stage does with a received message. `position` is where my player really is (null
+ * when it is not playing as it should): replies carry it, so a joiner lands where I am.
+ */
+export function routeMessage(
+  state: MediaState,
+  msg: MediaMessage,
+  from: string,
+  ctx: { self: Role; position: number | null; now: number },
+): Routed {
+  const answer = () => {
+    const m = stateMessage(state, ctx.position, ctx.now);
+    return m ? { to: [from], msg: m } : null;
+  };
+  switch (msg.t) {
+    case 'media-req':
+      return { next: state, reply: answer(), syncPlayer: false };
+    case 'media-state': {
+      const r = receiveState(state, msg, ctx.self);
+      if (r.next === state) return { next: state, reply: r.answer ? answer() : null, syncPlayer: false };
+      const sameMedia = sourceKey(r.next.source) === sourceKey(state.source);
+      return { next: r.next, reply: null, syncPlayer: sameMedia };
+    }
+    default:
+      // media-load: the media-state that follows carries everything.
+      return { next: state, reply: null, syncPlayer: false };
+  }
+}
+
+/** One key per media, so a new one mounts a new player. */
+export function sourceKey(src: MediaSource | null): string | null {
+  if (!src) return null;
+  return src.kind === 'youtube' ? `yt:${src.videoId}` : `audio:${src.driveId}`;
+}
+
+/**
+ * When the echo guard ends: the player's real state, if it differs from the synced one (an action the
+ * person took inside the window, swallowed with the echoes), else null. Never for a blocked player.
+ */
+export function missedAction(state: MediaState, actual: Observed, now: number, blocked: boolean): Observed | null {
+  if (blocked || !isLocalChange(state, actual, now)) return null;
+  return actual;
+}
