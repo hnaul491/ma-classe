@@ -1,22 +1,23 @@
 import { FILE_ROW_COLUMNS, LEGACY_FILE_ROW_COLUMNS, legacyFileRow, shouldRetryWithoutDocumentColumns, type FileRow } from '@/features/documents/group';
 import { isUuid } from '@/features/documents/params';
 import { createBrowserSupabase } from '@/lib/supabase/client';
-import { sceneFileIds } from './files';
+import { BACKUP_PREFIX } from './backup';
+import { isMissingFunction } from './merge';
 import type { BoardElement } from './protocol';
 
 export type StoredFile = { id: string; storage_path: string; mime: string; width: number; height: number };
 
-export const backupKey = (lessonId: string) => `board-backup:${lessonId}`;
+export const backupKey = (lessonId: string) => `${BACKUP_PREFIX}${lessonId}`;
 
-/** The saved scene and the files it uses. Files are found by id, so documents re-used from older lessons load too. */
-export async function loadBoard(lessonId: string): Promise<{ elements: BoardElement[]; files: StoredFile[] }> {
-  const supabase = createBrowserSupabase();
-  const save = await supabase.from('board_saves').select('scene').eq('lesson_id', lessonId).maybeSingle();
+/**
+ * The saved scene. Its images are fetched afterwards, in the background (Board's fetchMissingFiles),
+ * so a slow image never holds up the board.
+ */
+export async function loadBoard(lessonId: string): Promise<BoardElement[]> {
+  const save = await createBrowserSupabase().from('board_saves').select('scene').eq('lesson_id', lessonId).maybeSingle();
   if (save.error) throw new Error('Could not load the board', { cause: save.error });
-  const elements = (save.data?.scene as { elements?: BoardElement[] } | undefined)?.elements ?? [];
-  const fileIds = sceneFileIds(elements);
-  if (fileIds.length === 0) return { elements, files: [] };
-  return { elements, files: await loadFiles(fileIds) };
+  const elements = (save.data?.scene as { elements?: unknown } | undefined)?.elements;
+  return Array.isArray(elements) ? (elements as BoardElement[]) : [];
 }
 
 /** The stored files with these ids (missing ids are left out). */
@@ -45,8 +46,16 @@ export async function loadDocumentFiles(documentId: string): Promise<FileRow[]> 
   return ((legacy.data ?? []) as Omit<FileRow, 'document_id' | 'page_index'>[]).map(legacyFileRow);
 }
 
+/**
+ * Saves the scene by merging it into the stored one, element by element (migration 0006), so a
+ * client with a stale scene cannot roll the board back. Before 0006 runs, falls back to a plain upsert.
+ */
 export async function saveBoard(lessonId: string, email: string, elements: readonly BoardElement[]): Promise<void> {
-  const { error } = await createBrowserSupabase()
+  const supabase = createBrowserSupabase();
+  const merged = await supabase.rpc('merge_board_save', { p_lesson_id: lessonId, p_elements: elements, p_email: email });
+  if (!merged.error) return;
+  if (!isMissingFunction(merged.error)) throw new Error('Could not save the board', { cause: merged.error });
+  const { error } = await supabase
     .from('board_saves')
     .upsert({ lesson_id: lessonId, scene: { elements }, updated_at: new Date().toISOString(), updated_by: email });
   if (error) throw new Error('Could not save the board', { cause: error });

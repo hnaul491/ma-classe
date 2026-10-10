@@ -14,6 +14,9 @@ export type BoardMessage =
   | { t: 'pointer'; x: number; y: number; tool: 'pointer' | 'laser'; button: 'up' | 'down' };
 
 const IMAGE_MIMES = ['image/webp', 'image/png', 'image/jpeg'];
+/** Excalidraw's own zoom limits: a peer cannot push the view outside them. */
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 30;
 
 export function encodeBoard(msg: BoardMessage): string {
   return JSON.stringify({ v: 1, ...msg });
@@ -55,7 +58,7 @@ export function decodeBoard(text: string): BoardMessage | null {
         : null;
     case 'viewport':
       return finite(m.cx) && finite(m.cy) && finite(m.zoom) && m.zoom > 0
-        ? { t: 'viewport', cx: m.cx, cy: m.cy, zoom: m.zoom }
+        ? { t: 'viewport', cx: m.cx, cy: m.cy, zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, m.zoom)) }
         : null;
     case 'pointer':
       return finite(m.x) && finite(m.y) && (m.tool === 'pointer' || m.tool === 'laser') && (m.button === 'up' || m.button === 'down')

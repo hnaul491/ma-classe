@@ -34,3 +34,17 @@ describe('board protocol', () => {
     expect(fitsInPacket('é'.repeat(PACKET_LIMIT / 2 + 1))).toBe(false); // counts UTF-8 bytes, not characters
   });
 });
+
+describe('viewport zoom from the peer', () => {
+  it('is clamped to 0.1–30, like Excalidraw', () => {
+    const zoomOf = (zoom: number) => {
+      const m = decodeBoard(JSON.stringify({ v: 1, t: 'viewport', cx: 0, cy: 0, zoom }));
+      return m?.t === 'viewport' ? m.zoom : null;
+    };
+    expect(zoomOf(1e9)).toBe(30);
+    expect(zoomOf(30)).toBe(30);
+    expect(zoomOf(0.01)).toBe(0.1);
+    expect(zoomOf(1.5)).toBe(1.5);
+    expect(zoomOf(-1)).toBeNull();
+  });
+});

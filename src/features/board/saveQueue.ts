@@ -4,11 +4,16 @@ export function createSaveQueue(opts: {
   onFailures: (count: number) => void;
   delayMs?: number;
   retryMs?: number;
+  /** Longest a pushed scene waits while changes keep coming (the debounce alone would never fire). */
+  maxWaitMs?: number;
 }) {
   const delayMs = opts.delayMs ?? 3000;
   const retryMs = opts.retryMs ?? 10000;
+  const maxWaitMs = opts.maxWaitMs ?? 15000;
   let pending: unknown = undefined;
   let hasPending = false;
+  /** When the oldest unsaved push must be saved at the latest (null: nothing waiting). */
+  let deadline: number | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let inFlight: Promise<void> | null = null;
@@ -28,6 +33,7 @@ export function createSaveQueue(opts: {
     if (disposed || !hasPending) return Promise.resolve();
     const scene = pending;
     hasPending = false;
+    deadline = null;
     inFlight = (async () => {
       try {
         await Promise.resolve().then(() => opts.save(scene));
@@ -63,7 +69,13 @@ export function createSaveQueue(opts: {
     push(scene: unknown) {
       pending = scene;
       hasPending = true;
-      arm(failures > 0 ? retryMs : delayMs);
+      const now = Date.now();
+      if (deadline === null) deadline = now + maxWaitMs;
+      arm(Math.max(0, Math.min(failures > 0 ? retryMs : delayMs, deadline - now)));
+    },
+    /** True while a scene is waiting, being saved, or failed and not saved since. */
+    hasUnsaved(): boolean {
+      return hasPending || inFlight !== null || failures > 0;
     },
     /** Waits for any in-flight save, then saves the latest scene. True when everything is saved. */
     async flush(): Promise<boolean> {

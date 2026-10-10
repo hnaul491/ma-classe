@@ -8,16 +8,17 @@ import type { ExcalidrawElement, FileId, OrderedExcalidrawElement } from '@excal
 import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, ExcalidrawProps, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent, type RemoteParticipant } from 'livekit-client';
-import { useCallback, useEffect, useEffectEvent, useId, useReducer, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useEffectEvent, useId, useImperativeHandle, useReducer, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
-import { parseBackup, shouldWriteBackup } from '@/features/board/backup';
+import { BACKUP_PREFIX, parseBackup, prunableBackupKeys, shouldWriteBackup } from '@/features/board/backup';
 import { droppedFile, hasUnstoredImages, isFileDrag, sceneFileIds } from '@/features/board/files';
 import { backupKey, loadBoard, loadDocumentFiles, loadFiles, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
+import { loadRetryDelay, withTimeout } from '@/features/board/retry';
 import { createSaveQueue } from '@/features/board/saveQueue';
 import { createDebounce, createThrottle, type Debounce, type Throttle } from '@/features/board/timing';
-import { checkUpload, downloadAsDataURL, isFilePathFor, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
+import { checkUpload, downloadAsDataURL, imageMime, isFilePathFor, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
 import { DocumentPicker } from '@/features/documents/DocumentPicker';
 import type { FileRow } from '@/features/documents/group';
 import { addParam } from '@/features/documents/params';
@@ -36,6 +37,8 @@ const POINTER_EVERY_MS = 50;
 /** Space above the first inserted page, and between page images (as in layoutPages: 80 px, frames add 20 each side). */
 const FIRST_PAGE_GAP = 160;
 const NEXT_PAGE_GAP = 60;
+/** An image download that takes longer is given up (a later message or lookup retries it). */
+const DOWNLOAD_TIMEOUT_MS = 20000;
 
 /** Module-level so Excalidraw's memo sees the same object every render. */
 const UI_OPTIONS = {
@@ -47,6 +50,13 @@ const UI_OPTIONS = {
 type PointerMessage = Extract<BoardMessage, { t: 'pointer' }>;
 type SaveQueue = ReturnType<typeof createSaveQueue>;
 type BoardSend = ReturnType<typeof useBoardChannel>['send'];
+type LoadResult = 'loaded' | 'failed' | 'cancelled';
+
+/** What RoomShell may ask of the board. */
+export type BoardHandle = {
+  /** Sends the last strokes and saves the scene now. True when everything is saved. */
+  flush: () => Promise<boolean>;
+};
 
 function readTheme(): 'light' | 'dark' {
   if (typeof document === 'undefined') return 'light';
@@ -71,9 +81,10 @@ function useThemeName(): 'light' | 'dark' {
   return theme;
 }
 
-function writeBackup(key: string, scene: unknown) {
+function writeBackup(key: string, scene: { elements: readonly unknown[] }) {
   try {
-    localStorage.setItem(key, JSON.stringify(scene));
+    // savedAt lets a later visit drop backups that are a week old (prunableBackupKeys).
+    localStorage.setItem(key, JSON.stringify({ elements: scene.elements, savedAt: Date.now() }));
   } catch {
     // Storage full or blocked: the save retry still runs.
   }
@@ -84,6 +95,20 @@ function readBackup(key: string): BoardElement[] | null {
     return parseBackup(localStorage.getItem(key));
   } catch {
     return null;
+  }
+}
+
+/** Drops week-old and unreadable board backups of other lessons. */
+function pruneBackups(keep: string) {
+  try {
+    const entries: [string, string | null][] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(BACKUP_PREFIX)) entries.push([k, localStorage.getItem(k)]);
+    }
+    for (const k of prunableBackupKeys(entries, Date.now(), keep)) localStorage.removeItem(k);
+  } catch {
+    // Blocked storage: nothing to prune.
   }
 }
 
@@ -108,6 +133,7 @@ export default function Board({
   visible,
   onError,
   onShow,
+  flushRef,
 }: {
   lessonId: string;
   member: Member;
@@ -115,6 +141,8 @@ export default function Board({
   onError: (key: MessageKey) => void;
   /** Bring the board on stage (a document is being added from the Documents page). */
   onShow?: () => void;
+  /** Filled with the board's handle, so End lesson can save the board first. */
+  flushRef?: RefObject<BoardHandle | null>;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -130,7 +158,11 @@ export default function Board({
   const loaded = useRef(false);
   /** True once the localStorage backup is in the scene (after a failed load), so pagehide may replace it. */
   const backupMerged = useRef(false);
-  const loadFailed = useRef(false);
+  /** The load in progress, so a retry and a reconnect never run two loads at once. */
+  const loading = useRef<Promise<LoadResult> | null>(null);
+  const loadFailReported = useRef(false);
+  /** Shown until the saved board loads after a failure: until then nothing is saved. */
+  const [notSaved, setNotSaved] = useState(false);
   const mounted = useRef(true);
   const queue = useRef<SaveQueue | null>(null);
   const elementSender = useRef<Debounce | null>(null);
@@ -167,8 +199,15 @@ export default function Board({
       const running = downloads.current.get(fileId);
       if (running) return running;
       const download = (async () => {
-        const dataURL = await downloadAsDataURL(path);
-        api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: mime as BinaryFileData['mimeType'], created: Date.now() }]);
+        const added = await withTimeout(
+          downloadAsDataURL(path, mime).then((f) => {
+            api.addFiles([{ id: fileId as FileId, dataURL: f.dataURL as BinaryFileData['dataURL'], mimeType: f.mime, created: Date.now() }]);
+            return true;
+          }),
+          DOWNLOAD_TIMEOUT_MS,
+          false,
+        );
+        if (!added) throw new Error('The image could not be downloaded in time');
       })().finally(() => {
         if (downloads.current.get(fileId) === download) downloads.current.delete(fileId);
       });
@@ -279,7 +318,7 @@ export default function Board({
         await saveBoard(lessonId, member.email, (scene as { elements: BoardElement[] }).elements);
         removeBackup(key);
       },
-      backup: (scene) => writeBackup(key, scene),
+      backup: (scene) => writeBackup(key, scene as { elements: readonly unknown[] }),
       onFailures: (n) => {
         if (n === 3) reportError('board.saveFailed');
       },
@@ -297,8 +336,10 @@ export default function Board({
       SEND_MAX_WAIT_MS,
     );
     const onPageHide = () => {
-      // Never replace an older backup with a scene that does not contain it.
-      if (!shouldWriteBackup({ loaded: loaded.current, backupMerged: backupMerged.current })) return;
+      sender.flush(); // the last strokes reach the queue, so hasUnsaved sees them
+      // Never replace an older backup with a scene that does not contain it, and leave none behind
+      // when everything is saved.
+      if (!shouldWriteBackup({ loaded: loaded.current, backupMerged: backupMerged.current, unsaved: q.hasUnsaved() })) return;
       if (latest.current.length > 0) writeBackup(key, { elements: latest.current });
     };
     window.addEventListener('pagehide', onPageHide);
@@ -313,6 +354,24 @@ export default function Board({
       void q.flush().finally(() => q.dispose());
     };
   }, [lessonId, member.email, send]);
+
+  // Backups of other lessons that are a week old (or from before savedAt) would stay forever.
+  useEffect(() => pruneBackups(backupKey(lessonId)), [lessonId]);
+
+  // End lesson saves the board first.
+  useImperativeHandle(
+    flushRef,
+    () => ({
+      flush: async () => {
+        elementSender.current?.flush(); // pushes the last strokes to the queue
+        const q = queue.current;
+        // Before the saved board is loaded nothing may be saved (it would replace the board with less).
+        if (!q || !loaded.current) return false;
+        return q.flush();
+      },
+    }),
+    [],
+  );
 
   // Pointer (laser) and, for the teacher, viewport broadcasting.
   useEffect(() => {
@@ -357,33 +416,36 @@ export default function Board({
   }, []);
 
   /**
-   * Loads the saved scene, its images and any local backup. On failure, the backup is still merged
-   * locally (not saved), so a later pagehide cannot replace it with less. The caller reports 'failed'.
+   * Loads the saved scene and any local backup. Elements are applied first and the board counts as
+   * loaded at once; their images download in the background (applyRemote → fetchMissingFiles), so a
+   * slow image never holds up saving. On failure, the backup is still merged locally (not saved),
+   * so a later pagehide cannot replace it with less.
    */
   const loadScene = useCallback(
-    async (isCancelled: () => boolean): Promise<'loaded' | 'failed' | 'cancelled'> => {
+    async (isCancelled: () => boolean): Promise<LoadResult> => {
       if (!api) return 'cancelled';
       const key = backupKey(lessonId);
       try {
         const saved = await loadBoard(lessonId);
         if (isCancelled()) return 'cancelled';
-        await Promise.all(saved.files.map((f) => addFileFromStorage(f.id, f.storage_path, f.mime).catch(() => {})));
-        if (isCancelled()) return 'cancelled';
-        if (saved.elements.length > 0) applyRemote(saved.elements);
+        if (saved.length > 0) applyRemote(saved);
         loaded.current = true;
-        loadFailed.current = false;
         const backup = readBackup(key);
         if (backup) {
-          applyRemote(backup); // also pushes the merged scene to the save queue
+          applyRemote(backup);
           backupMerged.current = true;
-          const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
+        }
+        const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
+        if (all.length > 0) {
+          // Save now what was drawn before the load (or came from the backup): the save merges by element.
+          queue.current?.push({ elements: all });
+          // And send the merged scene to the other person once.
           markKnown(known.current, all);
           void send({ t: 'elements', elements: all }).catch(() => {});
         }
         return 'loaded';
       } catch {
         if (isCancelled()) return 'cancelled';
-        loadFailed.current = true;
         if (!backupMerged.current) {
           const backup = readBackup(key);
           if (backup) applyRemote(backup); // not saved: loaded is still false
@@ -392,7 +454,7 @@ export default function Board({
         return 'failed';
       }
     },
-    [api, lessonId, addFileFromStorage, applyRemote, send],
+    [api, lessonId, applyRemote, send],
   );
 
   // `?add=<documentId>` (from the Documents page): place that document once, after the board has loaded.
@@ -416,38 +478,66 @@ export default function Board({
     })();
   });
 
-  // First load; then ask the other person for anything newer.
+  /** Runs one load, or joins the one in progress. Reports the first failure; shows board.notSaved until loaded. */
+  const runLoad = useEffectEvent((isCancelled: () => boolean): Promise<LoadResult> => {
+    if (loading.current) return loading.current;
+    const run = loadScene(isCancelled)
+      .then((result) => {
+        if (result === 'loaded') {
+          setNotSaved(false);
+          addFromUrl();
+        } else if (result === 'failed') {
+          setNotSaved(true);
+          if (!loadFailReported.current) {
+            loadFailReported.current = true;
+            reportError('board.loadFailed');
+          }
+        }
+        return result;
+      })
+      .finally(() => {
+        if (loading.current === run) loading.current = null;
+      });
+    loading.current = run;
+    return run;
+  });
+
+  // First load, retried with backoff (5 s, 10 s, 20 s, then every 30 s) until it works: until then
+  // nothing is saved. Then ask the other person for anything newer.
   useEffect(() => {
     if (!api) return;
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     loaded.current = false;
     backupMerged.current = false;
-    loadFailed.current = false;
+    loading.current = null;
+    loadFailReported.current = false;
     // A new Excalidraw instance has no files yet.
     downloads.current.clear();
     lookedUp.current.clear();
     if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
-    void loadScene(() => cancelled).then((result) => {
-      if (cancelled) return;
-      if (result === 'failed') reportError('board.loadFailed');
-      if (result === 'loaded') addFromUrl();
-      void send({ t: 'scene-req' }).catch(() => {});
-    });
+    const attempt = (n: number) => {
+      if (cancelled || loaded.current) return; // a reconnect may have loaded it meanwhile
+      void runLoad(() => cancelled).then(() => {
+        if (cancelled) return;
+        if (n === 0) void send({ t: 'scene-req' }).catch(() => {});
+        if (!loaded.current) retry = setTimeout(() => attempt(n + 1), loadRetryDelay(n));
+      });
+    };
+    attempt(0);
     return () => {
       cancelled = true;
+      clearTimeout(retry);
+      loading.current = null; // the cancelled load must not block the next one
     };
-  }, [api, isStudent, loadScene, send]);
+  }, [api, lessonId, isStudent, send]);
 
   // After a reconnect: catch up both ways, save, and re-sync the follow view.
   const onReconnected = useEffectEvent(() => {
     if (!api) return;
     void (async () => {
-      // A failed first load disables saving; retry it now that the connection is back.
-      if (!loaded.current && loadFailed.current) {
-        const result = await loadScene(() => !mounted.current);
-        if (result === 'failed') reportError('board.loadFailed');
-        if (result === 'loaded') addFromUrl();
-      }
+      // Until the saved board loads, nothing is saved; try now that the connection is back.
+      if (!loaded.current) await runLoad(() => !mounted.current);
       if (!mounted.current) return;
       void send({ t: 'scene-req' }).catch(() => {});
       const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
@@ -457,17 +547,29 @@ export default function Board({
       if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
     })();
   });
+  // Connected, or the other person joined: ask again for their scene (and the teacher's view), in
+  // case the first request went out before anyone was there to answer.
+  const askPeer = useEffectEvent(() => {
+    if (!api) return;
+    void send({ t: 'scene-req' }).catch(() => {});
+    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
+  });
   const onPeerLeft = useEffectEvent((p: RemoteParticipant) => {
     if (!collaborators.current.delete(p.identity as SocketId)) return;
     api?.updateScene({ collaborators: new Map(collaborators.current) });
   });
   useEffect(() => {
     const reconnected = () => onReconnected();
+    const ask = () => askPeer();
     const left = (p: RemoteParticipant) => onPeerLeft(p);
     room.on(RoomEvent.Reconnected, reconnected);
+    room.on(RoomEvent.Connected, ask);
+    room.on(RoomEvent.ParticipantConnected, ask);
     room.on(RoomEvent.ParticipantDisconnected, left);
     return () => {
       room.off(RoomEvent.Reconnected, reconnected);
+      room.off(RoomEvent.Connected, ask);
+      room.off(RoomEvent.ParticipantConnected, ask);
       room.off(RoomEvent.ParticipantDisconnected, left);
     };
   }, [room]);
@@ -568,10 +670,11 @@ export default function Board({
     const documentId = crypto.randomUUID();
     for (let i = 0; i < pages.length; i += 1) {
       if (kind === 'page') setProgress(t('board.adding', { n: i + 1, total: pages.length }));
-      const { fileId, path } = await uploadBoardImage(lessonId, pages[i], kind, name, { documentId, pageIndex: i });
+      // The real type: Safari encodes PNG when asked for WebP.
+      const { fileId, path, mime } = await uploadBoardImage(lessonId, pages[i], kind, name, { documentId, pageIndex: i });
       const dataURL = await blobToDataURL(pages[i].blob);
-      api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: 'image/webp', created: Date.now() }]);
-      void send({ t: 'file', fileId, path, mime: 'image/webp', width: pages[i].width, height: pages[i].height }).catch(() => {});
+      api.addFiles([{ id: fileId as FileId, dataURL: dataURL as BinaryFileData['dataURL'], mimeType: mime, created: Date.now() }]);
+      void send({ t: 'file', fileId, path, mime, width: pages[i].width, height: pages[i].height }).catch(() => {});
       addPageElements(api, fileId, pages[i], kind, i, start);
     }
     setProgress(null);
@@ -587,7 +690,9 @@ export default function Board({
       const row = rows[i];
       setProgress(row.kind === 'page' ? t('board.adding', { n: i + 1, total: rows.length }) : t('board.addingImage'));
       await addFileFromStorage(row.id, row.storage_path, 'image/webp');
-      void send({ t: 'file', fileId: row.id, path: row.storage_path, mime: 'image/webp', width: row.width, height: row.height }).catch(() => {});
+      // The type the download found (older uploads from Safari are PNG).
+      const mime = imageMime(api.getFiles()[row.id]?.mimeType);
+      void send({ t: 'file', fileId: row.id, path: row.storage_path, mime, width: row.width, height: row.height }).catch(() => {});
       addPageElements(api, row.id, row, row.kind, i, start);
     }
     setProgress(null);
@@ -606,8 +711,9 @@ export default function Board({
     if (!check.ok) return onError(check.reason);
     try {
       if (check.kind === 'pdf') {
-        setProgress(t('board.adding', { n: 1, total: 1 }));
-        const pages = await renderPdf(file, (n, total) => setProgress(t('board.adding', { n, total })));
+        // Rendering first ("Preparing page n of N"), then uploading ("Adding page n of N", in placePages).
+        setProgress(t('board.preparing', { n: 1, total: '…' }));
+        const pages = await renderPdf(file, (n, total) => setProgress(t('board.preparing', { n, total })));
         await placePages(pages, 'page', file.name);
       } else {
         setProgress(t('board.addingImage'));
@@ -698,7 +804,12 @@ export default function Board({
         <div className="pointer-events-auto">
           <AccentBar />
         </div>
-        <div className="pointer-events-auto flex items-center gap-2">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
+          {notSaved && (
+            <span role="status" className="rounded-lg bg-pen-soft px-3 py-1.5 text-sm font-medium text-pen shadow-sm">
+              {t('board.notSaved')}
+            </span>
+          )}
           {progress && <span role="status" className="card px-3 py-1.5 text-sm">{progress}</span>}
           <AddMenu
             open={menuOpen}
@@ -722,8 +833,13 @@ export default function Board({
         </div>
       </div>
 
-      {(sortedFrames.length > 1 || (isStudent && !follow.following)) && (
+      {(sortedFrames.length > 1 || isStudent) && (
         <div className="absolute right-3 top-16 z-10 flex flex-col items-end gap-2">
+          {isStudent && follow.following && (
+            <span role="status" className="rounded-full bg-blue px-3 py-1 text-xs font-medium text-surface shadow-sm">
+              {t('board.following')}
+            </span>
+          )}
           {isStudent && !follow.following && (
             <button
               type="button"

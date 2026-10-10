@@ -189,3 +189,61 @@ describe('createSaveQueue edge cases', () => {
     q.dispose();
   });
 });
+
+describe('createSaveQueue hasUnsaved', () => {
+  it('is false when nothing was pushed, true while pending or in flight, false once saved', async () => {
+    const save = vi.fn(() => new Promise<void>((r) => setTimeout(r, 100)));
+    const q = createSaveQueue({ save, backup: vi.fn(), onFailures: vi.fn(), delayMs: 10 });
+    expect(q.hasUnsaved()).toBe(false);
+    q.push({ n: 1 });
+    expect(q.hasUnsaved()).toBe(true); // pending
+    await vi.advanceTimersByTimeAsync(10);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(q.hasUnsaved()).toBe(true); // in flight
+    await vi.advanceTimersByTimeAsync(100);
+    expect(q.hasUnsaved()).toBe(false);
+    q.dispose();
+  });
+
+  it('stays true after a failed save until a later save succeeds', async () => {
+    let fail = true;
+    const save = vi.fn(async () => {
+      if (fail) throw new Error('offline');
+    });
+    const q = createSaveQueue({ save, backup: vi.fn(), onFailures: vi.fn(), delayMs: 10, retryMs: 100 });
+    q.push({ n: 1 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(q.hasUnsaved()).toBe(true);
+    fail = false;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(q.hasUnsaved()).toBe(false);
+    q.dispose();
+  });
+});
+
+describe('createSaveQueue maxWait', () => {
+  it('saves at least every maxWait while changes never stop', async () => {
+    const save = vi.fn(async () => {});
+    const q = createSaveQueue({ save, backup: vi.fn(), onFailures: vi.fn(), delayMs: 3000, maxWaitMs: 15000 });
+    // A push every second for 20 s: the 3 s debounce alone would never fire.
+    for (let i = 0; i < 20; i += 1) {
+      q.push({ n: i });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledWith({ n: 14 }); // the latest scene at the 15 s mark
+    q.dispose();
+  });
+
+  it('defaults to about 15 s', async () => {
+    const save = vi.fn(async () => {});
+    const q = createSaveQueue({ save, backup: vi.fn(), onFailures: vi.fn() });
+    for (let i = 0; i < 16; i += 1) {
+      q.push({ n: i });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(save).toHaveBeenCalledTimes(1);
+    q.dispose();
+  });
+});

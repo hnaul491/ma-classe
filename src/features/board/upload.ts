@@ -40,6 +40,18 @@ export function isFilePathFor(fileId: string, path: string): boolean {
 
 export { shouldRetryWithoutDocumentColumns };
 
+type ImageMime = 'image/webp' | 'image/png' | 'image/jpeg';
+const isImageMime = (m: string | undefined): m is ImageMime => m === 'image/webp' || m === 'image/png' || m === 'image/jpeg';
+
+/**
+ * The image type to store and announce, limited to the bucket's allow-list. A canvas asked for WebP
+ * gives PNG on Safari, so the blob's own type is used; anything else falls back (default WebP).
+ */
+export function imageMime(type: string | undefined, fallback: string = 'image/webp'): ImageMime {
+  if (isImageMime(type)) return type;
+  return isImageMime(fallback) ? fallback : 'image/webp';
+}
+
 export type RenderedPage = { blob: Blob; width: number; height: number };
 
 export async function uploadBoardImage(
@@ -48,18 +60,20 @@ export async function uploadBoardImage(
   kind: 'page' | 'image',
   name: string,
   doc?: { documentId: string; pageIndex: number },
-): Promise<{ fileId: string; path: string }> {
+): Promise<{ fileId: string; path: string; mime: ImageMime }> {
   const supabase = createBrowserSupabase();
   const fileId = crypto.randomUUID();
   const path = `${lessonId}/${fileId}.webp`;
-  const up = await supabase.storage.from(BUCKET).upload(path, page.blob, { contentType: 'image/webp', upsert: false });
+  // The path keeps .webp (peer messages are checked against it); the stored type is the real one.
+  const mime = imageMime(page.blob.type);
+  const up = await supabase.storage.from(BUCKET).upload(path, page.blob, { contentType: mime, upsert: false });
   if (up.error) throw new Error('Could not upload the image', { cause: up.error });
   const base = {
     id: fileId,
     lesson_id: lessonId,
     storage_path: path,
     kind,
-    mime: 'image/webp',
+    mime,
     size_bytes: page.blob.size,
     width: page.width,
     height: page.height,
@@ -69,16 +83,20 @@ export async function uploadBoardImage(
   // Before migration 0004 runs, record the file without its document grouping rather than fail.
   if (shouldRetryWithoutDocumentColumns(row.error)) row = await supabase.from('files').insert(base);
   if (row.error) throw new Error('Could not record the image', { cause: row.error });
-  return { fileId, path };
+  return { fileId, path, mime };
 }
 
-export async function downloadAsDataURL(path: string): Promise<string> {
+/** The stored image as a data URL, typed with its real (allowed) type; `mime` is used when storage gives none. */
+export async function downloadAsDataURL(path: string, mime?: string): Promise<{ dataURL: string; mime: ImageMime }> {
   const { data, error } = await createBrowserSupabase().storage.from(BUCKET).download(path);
   if (error || !data) throw new Error('Could not download the image', { cause: error });
-  return await new Promise<string>((resolve, reject) => {
+  const type = imageMime(data.type, imageMime(mime));
+  const blob = data.type === type ? data : new Blob([data], { type });
+  const dataURL = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(data);
+    reader.readAsDataURL(blob);
   });
+  return { dataURL, mime: type };
 }

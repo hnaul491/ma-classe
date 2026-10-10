@@ -20,6 +20,7 @@ function canvasToWebp(canvas: HTMLCanvasElement): Promise<Blob> {
   );
 }
 
+/** Renders every page to WebP; `onPage(n, total)` is called as page n starts rendering. */
 export async function renderPdf(file: File, onPage?: (n: number, total: number) => void): Promise<RenderedPage[]> {
   const pdfjs = await import('pdfjs-dist');
   pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -29,6 +30,7 @@ export async function renderPdf(file: File, onPage?: (n: number, total: number) 
     if (pdfPagesError(doc.numPages)) throw new PageLimitError(doc.numPages);
     const pages: RenderedPage[] = [];
     for (let n = 1; n <= doc.numPages; n += 1) {
+      onPage?.(n, doc.numPages);
       const page = await doc.getPage(n);
       const viewport = page.getViewport({ scale: PDF_SCALE });
       const canvas = document.createElement('canvas');
@@ -40,7 +42,6 @@ export async function renderPdf(file: File, onPage?: (n: number, total: number) 
       canvas.width = 0;
       canvas.height = 0;
       page.cleanup();
-      onPage?.(n, doc.numPages);
     }
     return pages;
   } finally {

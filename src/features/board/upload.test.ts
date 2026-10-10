@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkUpload, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError, shouldRetryWithoutDocumentColumns } from './upload';
+import { checkUpload, imageMime, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError, shouldRetryWithoutDocumentColumns } from './upload';
 
 describe('checkUpload', () => {
   it('accepts PDFs and PNG/JPG/WebP images', () => {
@@ -71,5 +71,21 @@ describe('shouldRetryWithoutDocumentColumns', () => {
     expect(shouldRetryWithoutDocumentColumns({ code: '23505' })).toBe(false);
     expect(shouldRetryWithoutDocumentColumns(null)).toBe(false);
     expect(shouldRetryWithoutDocumentColumns({})).toBe(false);
+  });
+});
+
+describe('imageMime', () => {
+  it('keeps an allowed image type (Safari encodes PNG when asked for WebP)', () => {
+    expect(imageMime('image/png')).toBe('image/png');
+    expect(imageMime('image/webp')).toBe('image/webp');
+    expect(imageMime('image/jpeg')).toBe('image/jpeg');
+  });
+
+  it('falls back for anything outside the bucket allow-list', () => {
+    expect(imageMime('')).toBe('image/webp');
+    expect(imageMime('image/svg+xml')).toBe('image/webp');
+    expect(imageMime(undefined, 'image/png')).toBe('image/png');
+    expect(imageMime('application/octet-stream', 'image/jpeg')).toBe('image/jpeg'); // storage without a content type
+    expect(imageMime('image/gif', 'image/gif')).toBe('image/webp');
   });
 });
