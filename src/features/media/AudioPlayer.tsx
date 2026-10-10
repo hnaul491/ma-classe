@@ -11,7 +11,7 @@ import { isAutoplayRejection, type Observed, type ObservedVia, type PlayerContro
 import type { MediaSource } from './protocol';
 
 type AudioSource = Extract<MediaSource, { kind: 'audio' }>;
-type Loaded = { key: string; url: string } | { key: string; problem: 'connect' | 'noAccess' | 'failed' };
+type Loaded = { key: string; url: string } | { key: string; problem: 'connect' | 'noAccess' | 'tooLarge' | 'failed' };
 
 /**
  * A Drive audio file with the browser's own controls. Each browser downloads its own copy with its own
@@ -48,7 +48,7 @@ export function AudioPlayer({
   useEffect(
     () =>
       loadObjectUrl(
-        () => downloadDriveFile({ id: source.driveId, name: source.name, mimeType: source.mimeType, sizeBytes: null }),
+        (signal) => downloadDriveFile({ id: source.driveId, name: source.name, mimeType: source.mimeType, sizeBytes: null }, undefined, { signal }),
         { create: (b) => URL.createObjectURL(b), revoke: (u) => URL.revokeObjectURL(u) },
         (r) => setLoaded('url' in r ? { key, url: r.url } : { key, problem: audioLoadProblem(r.error) }),
       ),
@@ -91,6 +91,11 @@ export function AudioPlayer({
       {current && 'problem' in current && current.problem === 'noAccess' && (
         <p role="alert" className="text-sm">
           {t('media.noAccess')}
+        </p>
+      )}
+      {current && 'problem' in current && current.problem === 'tooLarge' && (
+        <p role="alert" className="text-sm">
+          {t('drive.tooLarge')}
         </p>
       )}
       {current && 'problem' in current && current.problem === 'failed' && (

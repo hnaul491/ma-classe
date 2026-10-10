@@ -1,4 +1,5 @@
 import { googleConfig } from '@/lib/env';
+import { AUDIO_MAX_BYTES, DOC_MAX_BYTES } from '@/lib/limits';
 import { classifyDriveFile, type DriveFile } from './classify';
 import { loadScript } from './script';
 import { clearDriveToken, DriveAuthError, DriveReauthRequired, getCachedDriveToken, getDriveToken } from './token';
@@ -13,6 +14,14 @@ export class DriveExportTooLarge extends Error {
   constructor() {
     super('This file is too large for Drive to export as PDF');
     this.name = 'DriveExportTooLarge';
+  }
+}
+
+/** The file is over the limit for its kind (Content-Length, or the body once read). */
+export class DriveFileTooLarge extends Error {
+  constructor() {
+    super('This file is too large');
+    this.name = 'DriveFileTooLarge';
   }
 }
 
@@ -78,9 +87,10 @@ export const driveFetchCached: DriveFetch = createDriveFetch({
  * The toast for a failed Drive import (pick or download). DriveReauthRequired is handled before
  * this: it shows a Reconnect button instead.
  */
-export function driveErrorKey(e: unknown): 'drive.authCancelled' | 'drive.exportTooLarge' | 'drive.failed' {
+export function driveErrorKey(e: unknown): 'drive.authCancelled' | 'drive.exportTooLarge' | 'drive.tooLarge' | 'drive.failed' {
   if (e instanceof DriveAuthError) return 'drive.authCancelled';
   if (e instanceof DriveExportTooLarge) return 'drive.exportTooLarge';
+  if (e instanceof DriveFileTooLarge) return 'drive.tooLarge';
   return 'drive.failed';
 }
 
@@ -97,20 +107,35 @@ export async function driveErrorReason(res: Response): Promise<string | null> {
 
 /**
  * The file's content as a `File`: downloaded as is (PDF, image, audio), or exported to PDF (Docs and
- * Slides, named `<name>.pdf`). Throws DriveExportTooLarge over Drive's export limit. Never opens a
- * pop-up (it runs after the pick, outside the click): throws DriveReauthRequired instead.
+ * Slides, named `<name>.pdf`). Throws DriveExportTooLarge over Drive's export limit, and
+ * DriveFileTooLarge over the limit for its kind (audio 50 MB, others 30 MB) before reading the body
+ * when Drive sends Content-Length. `signal` aborts the download. Never opens a pop-up (it runs after
+ * the pick, outside the click): throws DriveReauthRequired instead.
  */
-export async function downloadDriveFile(f: DriveFile, fetchDrive: DriveFetch = driveFetchCached): Promise<File> {
+export async function downloadDriveFile(
+  f: DriveFile,
+  fetchDrive: DriveFetch = driveFetchCached,
+  opts: { signal?: AbortSignal; maxBytes?: number } = {},
+): Promise<File> {
   const kind = classifyDriveFile(f).kind;
   if (kind === 'reject') throw new Error(`Cannot import ${f.mimeType || 'this file'} from Drive`);
+  // The other person's audio comes with no known size: the cap is checked here, before buffering.
+  const maxBytes = opts.maxBytes ?? (kind === 'audio' ? AUDIO_MAX_BYTES : DOC_MAX_BYTES);
   const id = encodeURIComponent(f.id);
   const exporting = kind === 'export-pdf';
-  const res = await fetchDrive(exporting ? `files/${id}/export?mimeType=application%2Fpdf` : `files/${id}?alt=media&supportsAllDrives=true`);
+  const path = exporting ? `files/${id}/export?mimeType=application%2Fpdf` : `files/${id}?alt=media&supportsAllDrives=true`;
+  const res = await (opts.signal ? fetchDrive(path, { signal: opts.signal }) : fetchDrive(path));
   if (!res.ok) {
     if (exporting && res.status === 403 && (await driveErrorReason(res)) === 'exportSizeLimitExceeded') throw new DriveExportTooLarge();
     throw new DriveHttpError(res.status);
   }
+  const length = Number(res.headers.get('Content-Length'));
+  if (Number.isFinite(length) && length > maxBytes) {
+    void res.body?.cancel().catch(() => {});
+    throw new DriveFileTooLarge();
+  }
   const blob = await res.blob();
+  if (blob.size > maxBytes) throw new DriveFileTooLarge();
   if (!exporting) return new File([blob], f.name, { type: f.mimeType });
   const name = /\.pdf$/i.test(f.name) ? f.name : `${f.name}.pdf`;
   return new File([blob], name, { type: 'application/pdf' });
@@ -188,6 +213,8 @@ export async function openDrivePicker(opts: { mimeTypes?: readonly string[] } = 
         picker.dispose();
       })
       .build();
+    // The Picker attaches to the body, outside a fullscreen element, where it would be invisible.
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     picker.setVisible(true);
   });
 }

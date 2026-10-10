@@ -1,4 +1,4 @@
-import { AUDIO_MIMES } from '@/features/drive/limits';
+import { AUDIO_MIMES } from '@/lib/limits';
 import type { Role } from '@/lib/lessons/types';
 
 export const MEDIA_TOPIC = 'ma-classe-media';

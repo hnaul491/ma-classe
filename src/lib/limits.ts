@@ -1,7 +1,7 @@
-// Leaf constants: no imports, so pure modules (classification, media protocol) stay free of
-// Supabase and browser code.
+// Leaf constants, the one source for board uploads, Drive imports, the board and media protocols: no
+// imports, so pure modules (classification, protocols) stay free of Supabase and browser code.
 
-/** PDFs and images from Drive: the same limit as board uploads (`MAX_BYTES` in board/upload). */
+/** PDFs and images, uploaded or from Drive. */
 export const DOC_MAX_BYTES = 30 * 1024 * 1024;
 export const AUDIO_MAX_BYTES = 50 * 1024 * 1024;
 

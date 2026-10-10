@@ -6,12 +6,14 @@ import {
   DRIVE_API,
   DriveExportTooLarge,
   driveErrorKey,
+  DriveFileTooLarge,
   DriveHttpError,
   driveErrorReason,
   DriveReauthRequired,
   pickedFile,
   pickerOutcome,
 } from './drive';
+import { AUDIO_MAX_BYTES, DOC_MAX_BYTES } from '@/lib/limits';
 import { DriveAuthError } from './token';
 
 function deps(responses: Response[], tokens = ['t1', 't2']) {
@@ -93,6 +95,7 @@ describe('driveErrorKey', () => {
     expect(driveErrorKey(new DriveExportTooLarge())).toBe('drive.exportTooLarge');
     expect(driveErrorKey(new Error('Drive download failed (500)'))).toBe('drive.failed');
     expect(driveErrorKey(new DriveHttpError(404))).toBe('drive.failed');
+    expect(driveErrorKey(new DriveFileTooLarge())).toBe('drive.tooLarge');
     expect(driveErrorKey('boom')).toBe('drive.failed');
   });
 });
@@ -164,6 +167,34 @@ describe('downloadDriveFile', () => {
     const f = await downloadDriveFile({ id: 'a1', name: 'dialogue.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch);
     expect(fetch.mock.calls[0]).toEqual(['files/a1?alt=media&supportsAllDrives=true']);
     expect(f.type).toBe('audio/mpeg');
+  });
+
+  it('refuses audio over 50 MB from Content-Length, before reading the body', async () => {
+    const res = new Response('x', { headers: { 'Content-Length': String(AUDIO_MAX_BYTES + 1) } });
+    const blob = vi.spyOn(res, 'blob');
+    const fetch = vi.fn(async () => res);
+    await expect(downloadDriveFile({ id: 'a', name: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch)).rejects.toBeInstanceOf(DriveFileTooLarge);
+    expect(blob).not.toHaveBeenCalled();
+  });
+
+  it('refuses a PDF over 30 MB from Content-Length', async () => {
+    const fetch = vi.fn(async () => new Response('x', { headers: { 'Content-Length': String(DOC_MAX_BYTES + 1) } }));
+    await expect(downloadDriveFile(pdf, fetch)).rejects.toBeInstanceOf(DriveFileTooLarge);
+  });
+
+  it('refuses a body over the cap even without Content-Length', async () => {
+    const res = new Response('x');
+    vi.spyOn(res, 'blob').mockResolvedValue(new Blob([new Uint8Array(8)]));
+    res.headers.delete('Content-Length');
+    const fetch = vi.fn(async () => res);
+    await expect(downloadDriveFile({ id: 'a', name: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch, { maxBytes: 4 })).rejects.toBeInstanceOf(DriveFileTooLarge);
+  });
+
+  it('passes the abort signal to the fetch, so a source change stops the download', async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn(async (path: string, init?: RequestInit) => (void path, void init, new Response(new Uint8Array([1]))));
+    await downloadDriveFile(pdf, fetch, { signal: controller.signal });
+    expect(fetch.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
   it('refuses a file it cannot handle, without fetching', async () => {

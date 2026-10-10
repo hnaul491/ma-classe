@@ -1,6 +1,6 @@
-import { AUDIO_MAX_BYTES, AUDIO_MIMES, DOC_MAX_BYTES, IMAGE_MIMES } from './limits';
+import { AUDIO_MAX_BYTES, AUDIO_MIMES, DOC_MAX_BYTES, IMAGE_MIMES } from '@/lib/limits';
 
-export { AUDIO_MAX_BYTES, AUDIO_MIMES } from './limits';
+export { AUDIO_MAX_BYTES, AUDIO_MIMES } from '@/lib/limits';
 /** PDFs and images: the same limit as uploads (30 MB). */
 export const DRIVE_DOC_MAX_BYTES = DOC_MAX_BYTES;
 

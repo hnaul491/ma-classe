@@ -42,6 +42,17 @@ describe('loadObjectUrl', () => {
     expect(done).not.toHaveBeenCalled();
   });
 
+  it('aborts the download when cancelled (a source change or unmount)', () => {
+    let seen: AbortSignal | null = null;
+    const cancel = loadObjectUrl((signal) => {
+      seen = signal;
+      return new Promise<Blob>(() => {});
+    }, deps(), vi.fn());
+    expect(seen!.aborted).toBe(false);
+    cancel();
+    expect(seen!.aborted).toBe(true);
+  });
+
   it('reports a failed download, unless already cancelled', async () => {
     const d = deps();
     const done = vi.fn();

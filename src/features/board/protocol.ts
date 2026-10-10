@@ -1,3 +1,5 @@
+import { IMAGE_MIMES } from '@/lib/limits';
+
 export const BOARD_TOPIC = 'ma-classe-board';
 export const SCENE_TOPIC = 'ma-classe-board-scene';
 /** Reliable LiveKit packets must stay under ~15 KB; above this we use a text stream. */
@@ -13,7 +15,6 @@ export type BoardMessage =
   | { t: 'viewport'; cx: number; cy: number; zoom: number }
   | { t: 'pointer'; x: number; y: number; tool: 'pointer' | 'laser'; button: 'up' | 'down' };
 
-const IMAGE_MIMES = ['image/webp', 'image/png', 'image/jpeg'];
 /** Excalidraw's own zoom limits: a peer cannot push the view outside them. */
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 30;

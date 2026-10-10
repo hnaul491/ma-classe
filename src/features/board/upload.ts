@@ -1,19 +1,18 @@
 import { shouldRetryWithoutDocumentColumns } from '@/features/documents/group';
 import { isUuid } from '@/features/documents/params';
+import { DOC_MAX_BYTES, IMAGE_MIMES } from '@/lib/limits';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
-export const MAX_BYTES = 30 * 1024 * 1024;
 export const MAX_PAGES = 50;
 const BUCKET = 'lesson-files';
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 export type UploadCheck = { ok: true; kind: 'pdf' | 'image' } | { ok: false; reason: 'board.unsupported' | 'board.fileTooLarge' };
 
 export function checkUpload(file: { name: string; type: string; size: number }): UploadCheck {
   const isPdf = file.type === 'application/pdf' || (file.type === '' && /\.pdf$/i.test(file.name));
-  const isImage = IMAGE_TYPES.includes(file.type);
+  const isImage = IMAGE_MIMES.includes(file.type);
   if (!isPdf && !isImage) return { ok: false, reason: 'board.unsupported' };
-  if (file.size > MAX_BYTES) return { ok: false, reason: 'board.fileTooLarge' };
+  if (file.size > DOC_MAX_BYTES) return { ok: false, reason: 'board.fileTooLarge' };
   return { ok: true, kind: isPdf ? 'pdf' : 'image' };
 }
 

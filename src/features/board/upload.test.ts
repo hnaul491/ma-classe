@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { checkUpload, imageMime, isFilePathFor, isLessonPath, MAX_BYTES, pdfPagesError, shouldRetryWithoutDocumentColumns } from './upload';
+import { DOC_MAX_BYTES } from '@/lib/limits';
+import { checkUpload, imageMime, isFilePathFor, isLessonPath, pdfPagesError, shouldRetryWithoutDocumentColumns } from './upload';
 
 describe('checkUpload', () => {
   it('accepts PDFs and PNG/JPG/WebP images', () => {
@@ -15,7 +16,7 @@ describe('checkUpload', () => {
 
   it('rejects other files and anything over 30 MB, before uploading', () => {
     expect(checkUpload({ name: 'x.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 10 })).toEqual({ ok: false, reason: 'board.unsupported' });
-    expect(checkUpload({ name: 'big.pdf', type: 'application/pdf', size: MAX_BYTES + 1 })).toEqual({ ok: false, reason: 'board.fileTooLarge' });
+    expect(checkUpload({ name: 'big.pdf', type: 'application/pdf', size: DOC_MAX_BYTES + 1 })).toEqual({ ok: false, reason: 'board.fileTooLarge' });
   });
 });
 

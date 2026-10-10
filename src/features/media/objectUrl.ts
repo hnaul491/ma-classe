@@ -1,15 +1,17 @@
 /**
  * Loads a blob and hands back an object URL for it. The returned cancel (for a source change or an
- * unmount) revokes that URL; a load that finishes after it never creates one, so nothing leaks.
+ * unmount) aborts the load and revokes that URL; a load that finishes after it never creates one, so
+ * nothing leaks.
  */
 export function loadObjectUrl(
-  load: () => Promise<Blob>,
+  load: (signal: AbortSignal) => Promise<Blob>,
   deps: { create: (b: Blob) => string; revoke: (url: string) => void },
   done: (r: { url: string } | { error: unknown }) => void,
 ): () => void {
   let cancelled = false;
   let url: string | null = null;
-  load().then(
+  const abort = new AbortController();
+  load(abort.signal).then(
     (blob) => {
       if (cancelled) return;
       url = deps.create(blob);
@@ -22,6 +24,7 @@ export function loadObjectUrl(
   return () => {
     if (cancelled) return;
     cancelled = true;
+    abort.abort();
     if (url) deps.revoke(url);
   };
 }
