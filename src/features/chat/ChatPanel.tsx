@@ -48,7 +48,7 @@ export function ChatPanel({
   focusInput = false,
   onInputFocused,
 }: {
-  /** The side panel is open (scrolling and sizing need the list on screen). */
+  /** The side panel is open on the Chat tab (scrolling, sizing and focus need the list on screen). */
   visible: boolean;
   messages: readonly ChatMessage[];
   send: (raw: string) => Promise<'chat.empty' | 'chat.tooLong' | null>;
@@ -57,7 +57,7 @@ export function ChatPanel({
   /** The draft lives in the parent so it survives tab switches and the docked/overlay switch. */
   draft: string;
   onDraftChange: (v: string) => void;
-  /** Put the cursor in the message box as soon as it is on screen (even on mount), then call `onInputFocused`. */
+  /** Put the cursor in the message box as soon as it is on screen, then call `onInputFocused`. */
   focusInput?: boolean;
   onInputFocused?: () => void;
 }) {
@@ -84,14 +84,8 @@ export function ChatPanel({
     if (visible) stickToBottom();
   }, [messages, visible]);
 
-  // Opening the panel puts the cursor in the message box (not when it simply starts out open).
-  const wasVisible = useRef(visible);
-  useEffect(() => {
-    if (visible && !wasVisible.current) input.current?.focus();
-    wasVisible.current = visible;
-  }, [visible]);
-
-  // A request from outside (a click on the new-message toast), also when this panel has just mounted.
+  // The cursor goes to the message box only when asked: the Chat button or the toast brought the chat on screen.
+  // Not when it simply starts out open, and not on a switch to the Chat tab (the focus stays on the tab).
   const inputFocused = useEffectEvent(() => onInputFocused?.());
   useEffect(() => {
     if (!visible || !focusInput) return;
@@ -102,7 +96,8 @@ export function ChatPanel({
   // Grow from 1 to 4 lines, then scroll inside the box.
   useLayoutEffect(() => {
     const el = input.current;
-    if (!el) return;
+    // Hidden, the box has no height to measure: it is sized again when it is shown.
+    if (!el || !visible) return;
     const cs = getComputedStyle(el);
     const px = (v: string) => parseFloat(v) || 0;
     const line = px(cs.lineHeight) || px(cs.fontSize) * 1.4;

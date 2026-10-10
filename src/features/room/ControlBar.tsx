@@ -68,6 +68,7 @@ export function ControlBar({
   mediaActive,
   onToggleMedia,
   chatOpen,
+  chatShown,
   chatUnread,
   onToggleChat,
   chatButtonRef,
@@ -83,6 +84,8 @@ export function ControlBar({
   mediaActive: boolean;
   onToggleMedia: () => void;
   chatOpen: boolean;
+  /** The panel is open on its Chat tab: only then does a click close the chat. */
+  chatShown: boolean;
   /** Messages from the other person not seen yet; shows a dot. */
   chatUnread: number;
   onToggleChat: () => void;
@@ -104,7 +107,7 @@ export function ControlBar({
     return () => clearTimeout(id);
   }, [confirmEnd]);
 
-  const chatLabel = chatOpen ? t('bar.closeChat') : chatUnread > 0 ? t('bar.chatUnread') : t('bar.chat');
+  const chatLabel = chatShown ? t('bar.closeChat') : chatUnread > 0 ? t('bar.chatUnread') : t('bar.chat');
   const endLabel = confirmEnd ? t('bar.confirmEnd') : t('bar.end');
   const onEndClick = () => {
     if (!confirmEnd) return setConfirmEnd(true);

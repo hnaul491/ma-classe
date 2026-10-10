@@ -196,6 +196,7 @@ export const en = {
   'vocab.noLesson': 'Added outside a lesson',
   'vocab.bookEmpty': 'No words yet. Words added during lessons appear here.',
   'vocab.noMatch': 'No word matches this search.',
+  'side.title': 'Chat and vocabulary',
   'side.unread': 'New',
 } as const;
 
@@ -397,6 +398,7 @@ export const fr: Record<MessageKey, string> = {
   'vocab.noLesson': 'Ajouté hors cours',
   'vocab.bookEmpty': 'Aucun mot pour l’instant. Les mots ajoutés pendant les cours apparaissent ici.',
   'vocab.noMatch': 'Aucun mot ne correspond à cette recherche.',
+  'side.title': 'Discussion et vocabulaire',
   'side.unread': 'Nouveau',
 };
 

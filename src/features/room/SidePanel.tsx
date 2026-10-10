@@ -3,7 +3,7 @@
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
-import { BellIcon, BellOffIcon } from './icons';
+import { BellIcon, BellOffIcon, CloseIcon } from './icons';
 
 export type SideTab = 'chat' | 'vocab';
 
@@ -44,19 +44,27 @@ export function SidePanel({
   const panelId = `${id}-panel`;
   const dot: Record<SideTab, boolean> = { chat: chatUnread > 0 && tab !== 'chat', vocab: vocabNew };
 
-  // Left and right move between the tabs and show the one reached (wrapping at the ends).
+  // Left and right move between the tabs and show the one reached (wrapping at the ends); Home and End go to
+  // the first and the last.
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const i = TABS.indexOf(tab);
+    const target: Partial<Record<string, number>> = {
+      ArrowRight: (i + 1) % TABS.length,
+      ArrowLeft: (i + TABS.length - 1) % TABS.length,
+      Home: 0,
+      End: TABS.length - 1,
+    };
+    const n = target[e.key];
+    if (n === undefined) return;
     e.preventDefault();
-    const step = e.key === 'ArrowRight' ? 1 : TABS.length - 1;
-    const next = TABS[(TABS.indexOf(tab) + step) % TABS.length];
+    const next = TABS[n];
     onTab(next);
     tabButtons.current[next]?.focus();
   }
 
   return (
     <section
-      aria-label={t(LABEL[tab])}
+      aria-label={t('side.title')}
       hidden={!open}
       className={
         docked
@@ -64,9 +72,10 @@ export function SidePanel({
           : 'card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80'
       }
     >
-      {/* min-h-11 fits a small button: the header keeps its height on the tab without one. */}
+      {/* min-h-11 fits a small button: the header keeps its height on the tab without one.
+          The labels may shorten (truncate) before the buttons are pushed out of a narrow card. */}
       <header className="flex min-h-11 items-stretch justify-between gap-2 border-b border-line px-3">
-        <div role="tablist" onKeyDown={onKeyDown} className="flex gap-3">
+        <div role="tablist" onKeyDown={onKeyDown} className="flex min-w-0 gap-3">
           {TABS.map((k) => (
             <button
               key={k}
@@ -80,21 +89,22 @@ export function SidePanel({
               aria-controls={panelId}
               tabIndex={tab === k ? 0 : -1}
               onClick={() => onTab(k)}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 py-2 text-sm font-semibold ${
+              title={t(LABEL[k])}
+              className={`-mb-px flex min-w-0 items-center gap-1.5 border-b-2 py-2 text-sm font-semibold ${
                 tab === k ? 'border-pen text-ink' : 'border-transparent text-muted hover:text-ink'
               }`}
             >
-              {t(LABEL[k])}
+              <span className="truncate">{t(LABEL[k])}</span>
               {dot[k] && (
                 <>
-                  <span aria-hidden className="size-2 rounded-full bg-pen" />
+                  <span aria-hidden className="size-2 shrink-0 rounded-full bg-pen" />
                   <span className="sr-only">{t('side.unread')}</span>
                 </>
               )}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 py-1.5">
+        <div className="flex shrink-0 items-center gap-2 py-1.5">
           {tab === 'chat' && (
             <button
               type="button"
@@ -108,8 +118,14 @@ export function SidePanel({
             </button>
           )}
           {!docked && (
-            <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
-              {t('common.close')}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t('common.close')}
+              title={t('common.close')}
+              className="btn btn-secondary btn-sm"
+            >
+              <CloseIcon />
             </button>
           )}
         </div>

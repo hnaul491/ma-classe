@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatSeen, initialToast, previewText, shouldNotify, titleWithCount, toastReducer } from './notify';
+import { chatButtonAction, chatSeen, initialToast, previewText, shouldNotify, titleWithCount, toastReducer } from './notify';
 
 describe('shouldNotify', () => {
   it('only for the other person while the panel is closed', () => {
@@ -69,5 +69,22 @@ describe('chatSeen', () => {
     expect(chatSeen({ open: true, hidden: true, tab: 'chat' })).toBe(false);
     expect(chatSeen({ open: false, hidden: false, tab: 'chat' })).toBe(false);
     expect(chatSeen({ open: true, hidden: false })).toBe(true);
+  });
+});
+
+describe('chatButtonAction', () => {
+  it('shows the chat when messages are unread and the chat is not on screen', () => {
+    expect(chatButtonAction({ open: false, tab: 'chat', unread: 2 })).toBe('open-chat');
+    expect(chatButtonAction({ open: false, tab: 'vocab', unread: 1 })).toBe('open-chat');
+    expect(chatButtonAction({ open: true, tab: 'vocab', unread: 1 })).toBe('open-chat');
+  });
+  it('toggles the panel when nothing is unread', () => {
+    expect(chatButtonAction({ open: false, tab: 'chat', unread: 0 })).toBe('toggle');
+    expect(chatButtonAction({ open: false, tab: 'vocab', unread: 0 })).toBe('toggle');
+    expect(chatButtonAction({ open: true, tab: 'vocab', unread: 0 })).toBe('toggle');
+    expect(chatButtonAction({ open: true, tab: 'chat', unread: 0 })).toBe('toggle');
+  });
+  it('closes the chat when it is the tab on screen, even with a count left over', () => {
+    expect(chatButtonAction({ open: true, tab: 'chat', unread: 3 })).toBe('toggle');
   });
 });

@@ -35,3 +35,20 @@ export function toastReducer(s: ToastState, a: ToastAction): ToastState {
 export function chatSeen({ open, hidden, tab = 'chat' }: { open: boolean; hidden: boolean; tab?: 'chat' | 'vocab' }): boolean {
   return open && !hidden && tab === 'chat';
 }
+
+/**
+ * What the control bar's Chat button does. With messages unread and the chat not on screen
+ * (panel closed, or open on another tab) it shows the chat; otherwise it opens or closes the panel.
+ * `unread` is the count still unseen (0 while the chat is seen), so "seen" needs no separate flag.
+ */
+export function chatButtonAction({
+  open,
+  tab,
+  unread,
+}: {
+  open: boolean;
+  tab: 'chat' | 'vocab';
+  unread: number;
+}): 'open-chat' | 'toggle' {
+  return unread > 0 && !(open && tab === 'chat') ? 'open-chat' : 'toggle';
+}

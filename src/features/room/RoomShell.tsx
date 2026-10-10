@@ -9,7 +9,7 @@ import { isFileDrag } from '@/features/board/files';
 import { withTimeout } from '@/features/board/retry';
 import { ChatPanel } from '@/features/chat/ChatPanel';
 import { ChatToast } from '@/features/chat/ChatToast';
-import { chatSeen, initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
+import { chatButtonAction, chatSeen, initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
 import { playDing, useAudioUnlock, useChatMuted } from '@/features/chat/sound';
 import { useChat } from '@/features/chat/useChat';
 import { useTabHidden } from '@/features/chat/useTabHidden';
@@ -97,7 +97,8 @@ export function RoomShell({
   // The side panel shows the chat or the lesson's vocabulary; personal too, and kept when the panel closes.
   const [sideTab, setSideTab] = useState<SideTab>('chat');
   const [draft, setDraft] = useState('');
-  // Set by a click on the new-message toast: the message box takes the cursor once the chat is on screen.
+  // Set when the Chat button or the new-message toast brings the chat on screen: the message box takes the
+  // cursor then. A tab switch never sets it, so the focus stays on the tab.
   const [chatFocusPending, setChatFocusPending] = useState(false);
   useAudioUnlock();
   const tabHidden = useTabHidden();
@@ -117,18 +118,31 @@ export function RoomShell({
     dispatchToast({ type: 'new', name: m.authorName, text: previewText(m.body) });
     void playDing();
   });
-  useTabTitle(seen ? 0 : chat.unread);
+  const chatUnseen = seen ? 0 : chat.unread;
+  useTabTitle(chatUnseen);
   const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
-  // On the Chat tab, opening shows everything, and closing counts what arrived while it was open as read.
-  // The panel keeps its tab: on the Vocabulary tab the chat stays unread (and its toast stays up).
+  const chatShown = chatOpen && sideTab === 'chat';
+  // The Chat button. With messages unread it always shows the chat (opening the panel or switching tab, never
+  // folding it); the `seen` effects below then mark them read and drop the toast.
+  // Otherwise it opens or folds the panel, which keeps its tab. On the Chat tab, opening shows everything and
+  // closing counts what arrived while it was open as read; on the Vocabulary tab the chat stays as it was.
   const toggleChat = useCallback(() => {
+    if (chatButtonAction({ open: chatOpen, tab: sideTab, unread: chatUnseen }) === 'open-chat') {
+      if (docked) setDockFolded(false);
+      else setOverlayOpen(true);
+      setSideTab('chat');
+      setChatFocusPending(true);
+      return;
+    }
     if (docked) setDockFolded((f) => !f);
     else setOverlayOpen((o) => !o);
     if (sideTab !== 'chat') return;
+    // Opening puts the cursor in the message box.
+    if (!chatOpen) setChatFocusPending(true);
     dispatchToast({ type: 'open' });
     markRead();
-  }, [docked, markRead, sideTab]);
+  }, [chatOpen, chatUnseen, docked, markRead, sideTab]);
   // The toast always leads to the chat, whatever tab the panel was on.
   const openChatFromToast = useCallback(() => {
     if (docked) setDockFolded(false);
@@ -300,23 +314,23 @@ export function RoomShell({
   const dockOpen = docked && chatOpen;
   // Keep the fullscreen button clear of the open overlay panel (w-80 + p-2 on each side = 21rem, plus a gap).
   const fsButtonRight = chatOpen && !docked ? 'right-3 sm:right-[21.5rem]' : 'right-3';
-  // One element, shown either docked in the rail or as the overlay. The tab not shown is unmounted:
-  // the messages, the draft and the words live up here, so nothing is lost.
+  // One element, shown either docked in the rail or as the overlay. Both tabs stay mounted (the one not shown
+  // is hidden), so a half-typed word or message survives a tab switch.
   const chatPanel = (
     <SidePanel
       open={chatOpen}
       docked={docked}
       tab={sideTab}
       onTab={setSideTab}
-      chatUnread={seen ? 0 : chat.unread}
+      chatUnread={chatUnseen}
       vocabNew={vocabNew}
       muted={chatMuted}
       onToggleMuted={toggleChatMuted}
       onClose={closeChat}
     >
-      {sideTab === 'chat' ? (
+      <div hidden={sideTab !== 'chat'} className={sideTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         <ChatPanel
-          visible={chatOpen}
+          visible={chatShown}
           messages={chat.messages}
           send={chat.send}
           member={member}
@@ -326,7 +340,8 @@ export function RoomShell({
           focusInput={chatFocusPending}
           onInputFocused={() => setChatFocusPending(false)}
         />
-      ) : (
+      </div>
+      <div hidden={sideTab !== 'vocab'} className={sideTab === 'vocab' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
         <VocabPanel
           words={vocab.words}
           status={vocab.status}
@@ -335,7 +350,7 @@ export function RoomShell({
           update={vocab.update}
           remove={vocab.remove}
         />
-      )}
+      </div>
     </SidePanel>
   );
   const fullscreenButton = (cls: string) => (
@@ -360,7 +375,8 @@ export function RoomShell({
       mediaActive={visible === 'media'}
       onToggleMedia={toggleMedia}
       chatOpen={chatOpen}
-      chatUnread={seen ? 0 : chat.unread}
+      chatShown={chatShown}
+      chatUnread={chatUnseen}
       onToggleChat={toggleChat}
       chatButtonRef={chatButton}
       onEnd={() => void onEnd()}
