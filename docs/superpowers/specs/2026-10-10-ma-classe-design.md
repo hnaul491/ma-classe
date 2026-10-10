@@ -169,7 +169,7 @@ Every stage module receives the room and the sync channel through props or conte
 
 ## 9. Sync protocol (LiveKit data)
 
-Each message is JSON with `{ t: <topic>, v: 1, from: <identity>, seq: <int>, ... }`.
+Each message is JSON `{ v: 1, t: <topic>, ... }` sent on one LiveKit data topic (`ma-classe`). The sender is identified by its LiveKit participant identity (the member email). Messages with an unknown `v` or malformed fields are ignored.
 
 | Topic | Payload | Reliability | Rate |
 |---|---|---|---|
@@ -193,17 +193,16 @@ Each message is JSON with `{ t: <topic>, v: 1, from: <identity>, seq: <int>, ...
 ## 10. Data model (Supabase Postgres)
 
 ```sql
-members      (id uuid pk = auth.users.id, email text unique, role text check (role in ('teacher','student')), display_name text)
+members      (email text pk check (email = lower(email)), role text check (role in ('teacher','student')) unique, display_name text)
 lessons      (id uuid pk, title text, status text check (status in ('live','ended')), started_at timestamptz, ended_at timestamptz)
 board_saves  (lesson_id uuid pk fk, scene jsonb, updated_at timestamptz, updated_by uuid)
 files        (id uuid pk, lesson_id uuid fk, storage_path text, kind text, mime text, size_bytes bigint, page_count int, source text check (source in ('upload','drive')), name text, created_at timestamptz)
 chat         (id uuid pk, lesson_id uuid fk, author_id uuid fk, body text, created_at timestamptz)
 vocab        (id uuid pk, lesson_id uuid fk null, french text, meaning_vi text, meaning_en text, example text, created_by uuid, created_at timestamptz, updated_at timestamptz)
-presence_log (id bigserial pk, lesson_id uuid fk, member_id uuid fk, joined_at timestamptz, left_at timestamptz)
 ```
 
 - Only one lesson can have `status = 'live'` at a time (partial unique index).
-- The membership allowlist is seeded by migration with the 2 emails; `id` is filled on first sign-in.
+- The membership allowlist is seeded by SQL with the 2 emails (one per role). "Who is in the room" comes from LiveKit `listParticipants`, not the database.
 - **Board saving:** the client that made the latest change upserts `board_saves` with a 3-second debounce, and again on End lesson. A failed save is retried from IndexedDB.
 - **Storage:** private bucket `lesson-files/<lesson_id>/...`; files are read through signed URLs.
 
@@ -215,7 +214,7 @@ presence_log (id bigserial pk, lesson_id uuid fk, member_id uuid fk, joined_at t
 - `/api/token`:
   - verifies the Supabase session server-side;
   - requires membership and a `live` lesson matching `[id]`;
-  - mints a LiveKit token with identity = member id, room = lesson id, grants `roomJoin`, `canPublish`, `canSubscribe`, `canPublishData`, and a TTL of 4 hours.
+  - mints a LiveKit token with identity = member email, room = lesson id, grants `roomJoin`, `canPublish`, `canSubscribe`, `canPublishData`, and a TTL of 4 hours.
   - The LiveKit API secret exists only in Vercel environment variables.
 - Lesson lifecycle: only the teacher can create a lesson (Start) or end it (End).
 - No secrets in the client bundle except public keys (Supabase anon key, Google Picker API key restricted by HTTP referrer).
@@ -234,7 +233,7 @@ presence_log (id bigserial pk, lesson_id uuid fk, member_id uuid fk, joined_at t
 | Drive export fails | Toast: "Couldn't convert this file. Export it as PDF and upload it." |
 | PDF over 50 pages or over 30 MB | Rejected before upload, with a message |
 | Supabase pause | Vercel Cron calls `/api/keepalive` daily, which runs one trivial query |
-| Free limit approaching | Usage meter on home warns at 70%. Minutes and data are estimated from `presence_log` (participant minutes × 540p bitrate); storage is the sum of `files.size_bytes`. |
+| Free limit approaching | Usage meter on home warns at 70%. Minutes and data are estimated from lesson durations × 2 participants (× 540p bitrate for data); storage is the sum of `files.size_bytes`. |
 | Bad deploy | Rule: no production deploys during lesson times. Recover with Vercel instant rollback. |
 | Total failure | Plan B button opens a Google Meet link stored in config |
 
