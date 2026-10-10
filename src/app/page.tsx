@@ -53,6 +53,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         </div>
       </header>
 
+      {member.role === 'teacher' && (
+        // A personal note from the student, always in French.
+        <p lang="fr" className="rounded-xl border-l-4 border-pen bg-pen-soft px-5 py-4 font-display text-lg font-medium text-ink">
+          J’apprécie vraiment vos efforts. Merci infiniment !
+        </p>
+      )}
+
       {sp.ended && (
         <p role="status" className="rounded-lg bg-good-soft px-4 py-3 text-good">
           {t('home.ended')}
