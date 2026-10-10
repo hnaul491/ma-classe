@@ -29,6 +29,18 @@ export class DriveAuthError extends Error {
   }
 }
 
+/**
+ * Drive needs a new token, which needs a pop-up, which browsers block without a click: the token
+ * expired or was revoked (Drive answered 401), or there is none for a request made outside a click.
+ * Show a "Reconnect Google Drive" button and retry from its click.
+ */
+export class DriveReauthRequired extends Error {
+  constructor() {
+    super('Google Drive needs to be reconnected');
+    this.name = 'DriveReauthRequired';
+  }
+}
+
 export function tokenValid(t: DriveToken | null, now: number): boolean {
   return t !== null && t.accessToken !== '' && t.expiresAt - now > EXPIRY_MARGIN_MS;
 }
@@ -55,6 +67,7 @@ export function gisTokenResult(r: google.accounts.oauth2.TokenResponse, scope: s
  * An in-memory token: reused while valid, otherwise requested once for all concurrent callers.
  * `request` is called synchronously from `get()`, so a pop-up keeps the caller's click.
  * A failed request is not cached. `clear()` (after a 401) makes the next `get()` ask again.
+ * `cached()` never asks: the valid token, the request already in flight, or DriveReauthRequired.
  */
 export function createTokenCache(request: () => Promise<DriveToken>, now: () => number = Date.now) {
   let token: DriveToken | null = null;
@@ -81,6 +94,11 @@ export function createTokenCache(request: () => Promise<DriveToken>, now: () => 
       );
       pending = p;
       return p;
+    },
+    cached(): Promise<string> {
+      if (tokenValid(token, now())) return Promise.resolve(token!.accessToken);
+      if (pending) return pending;
+      return Promise.reject(new DriveReauthRequired());
     },
     clear(): void {
       generation += 1;
@@ -190,6 +208,14 @@ export function preloadDriveAuth(): Promise<boolean> {
 /** A Google access token for Drive (read-only), from memory or a new GIS request. Call it from a click. */
 export function getDriveToken(): Promise<string> {
   return cache.get();
+}
+
+/**
+ * The token in memory, without ever opening a pop-up: for requests outside a click (the download
+ * after a pick). Rejects with DriveReauthRequired when there is none or it is about to expire.
+ */
+export function getCachedDriveToken(): Promise<string> {
+  return cache.cached();
 }
 
 /** Forgets the token, e.g. after Drive answered 401. */

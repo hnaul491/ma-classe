@@ -5,11 +5,13 @@ import {
   downloadDriveFile,
   DRIVE_API,
   DriveExportTooLarge,
+  driveErrorKey,
   driveErrorReason,
   DriveReauthRequired,
   pickedFile,
   pickerOutcome,
 } from './drive';
+import { DriveAuthError } from './token';
 
 function deps(responses: Response[], tokens = ['t1', 't2']) {
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -80,6 +82,16 @@ describe('createDriveFetch', () => {
     expect(res.status).toBe(403);
     expect(d.fetch).toHaveBeenCalledTimes(1);
     expect(d.clearToken).not.toHaveBeenCalled();
+  });
+});
+
+describe('driveErrorKey', () => {
+  it('maps a failed import to its toast', () => {
+    expect(driveErrorKey(new DriveAuthError('cancelled'))).toBe('drive.authCancelled');
+    expect(driveErrorKey(new DriveAuthError('no_scope'))).toBe('drive.authCancelled');
+    expect(driveErrorKey(new DriveExportTooLarge())).toBe('drive.exportTooLarge');
+    expect(driveErrorKey(new Error('Drive download failed (500)'))).toBe('drive.failed');
+    expect(driveErrorKey('boom')).toBe('drive.failed');
   });
 });
 

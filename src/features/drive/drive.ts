@@ -1,7 +1,9 @@
 import { googleConfig } from '@/lib/env';
 import { classifyDriveFile, type DriveFile } from './classify';
 import { loadScript } from './script';
-import { clearDriveToken, getDriveToken } from './token';
+import { clearDriveToken, DriveAuthError, DriveReauthRequired, getCachedDriveToken, getDriveToken } from './token';
+
+export { DriveReauthRequired } from './token';
 
 export const DRIVE_API = 'https://www.googleapis.com/drive/v3/';
 const PICKER_SRC = 'https://apis.google.com/js/api.js';
@@ -11,18 +13,6 @@ export class DriveExportTooLarge extends Error {
   constructor() {
     super('This file is too large for Drive to export as PDF');
     this.name = 'DriveExportTooLarge';
-  }
-}
-
-/**
- * Drive answered 401: the token expired or was revoked. The token is already cleared. Show a
- * "Reconnect Google Drive" button and retry from its click (a new token needs a pop-up, which
- * browsers block without a click).
- */
-export class DriveReauthRequired extends Error {
-  constructor() {
-    super('Google Drive needs to be reconnected');
-    this.name = 'DriveReauthRequired';
   }
 }
 
@@ -54,11 +44,32 @@ export function createDriveFetch(deps: DriveFetchDeps): DriveFetch {
   };
 }
 
+/** Drive fetch for a click: may open the Google pop-up for a new token. */
 export const driveFetch: DriveFetch = createDriveFetch({
   fetch: (url, init) => fetch(url, init),
   getToken: getDriveToken,
   clearToken: clearDriveToken,
 });
+
+/**
+ * Drive fetch outside a click (e.g. the download after a pick): never opens a pop-up, and throws
+ * DriveReauthRequired when the token is missing or about to expire.
+ */
+export const driveFetchCached: DriveFetch = createDriveFetch({
+  fetch: (url, init) => fetch(url, init),
+  getToken: getCachedDriveToken,
+  clearToken: clearDriveToken,
+});
+
+/**
+ * The toast for a failed Drive import (pick or download). DriveReauthRequired is handled before
+ * this: it shows a Reconnect button instead.
+ */
+export function driveErrorKey(e: unknown): 'drive.authCancelled' | 'drive.exportTooLarge' | 'drive.failed' {
+  if (e instanceof DriveAuthError) return 'drive.authCancelled';
+  if (e instanceof DriveExportTooLarge) return 'drive.exportTooLarge';
+  return 'drive.failed';
+}
 
 /** The `reason` of a Drive JSON error body (`error.errors[0].reason`), or null. */
 export async function driveErrorReason(res: Response): Promise<string | null> {
@@ -73,9 +84,10 @@ export async function driveErrorReason(res: Response): Promise<string | null> {
 
 /**
  * The file's content as a `File`: downloaded as is (PDF, image, audio), or exported to PDF (Docs and
- * Slides, named `<name>.pdf`). Throws DriveExportTooLarge over Drive's export limit.
+ * Slides, named `<name>.pdf`). Throws DriveExportTooLarge over Drive's export limit. Never opens a
+ * pop-up (it runs after the pick, outside the click): throws DriveReauthRequired instead.
  */
-export async function downloadDriveFile(f: DriveFile, fetchDrive: DriveFetch = driveFetch): Promise<File> {
+export async function downloadDriveFile(f: DriveFile, fetchDrive: DriveFetch = driveFetchCached): Promise<File> {
   const kind = classifyDriveFile(f).kind;
   if (kind === 'reject') throw new Error(`Cannot import ${f.mimeType || 'this file'} from Drive`);
   const id = encodeURIComponent(f.id);

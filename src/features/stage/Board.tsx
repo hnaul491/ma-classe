@@ -22,10 +22,15 @@ import { checkUpload, downloadAsDataURL, imageMime, isFilePathFor, isLessonPath,
 import { DocumentPicker } from '@/features/documents/DocumentPicker';
 import type { FileRow } from '@/features/documents/group';
 import { addParam } from '@/features/documents/params';
+import { classifyDriveFile, type DriveFile } from '@/features/drive/classify';
+import { downloadDriveFile, driveErrorKey, openDrivePicker } from '@/features/drive/drive';
+import { DriveReauthRequired, getDriveToken, preloadDriveAuth } from '@/features/drive/token';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
 import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
+import { CloseIcon } from '@/features/room/icons';
 import { isTypingElement } from '@/features/room/keys';
 import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, viewportFor } from '@/features/board/view';
+import { googleConfig } from '@/lib/env';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { Member } from '@/lib/lessons/types';
@@ -134,6 +139,7 @@ export default function Board({
   onError,
   onShow,
   flushRef,
+  onOpenMedia,
 }: {
   lessonId: string;
   member: Member;
@@ -143,6 +149,8 @@ export default function Board({
   onShow?: () => void;
   /** Filled with the board's handle, so End lesson can save the board first. */
   flushRef?: RefObject<BoardHandle | null>;
+  /** An audio file picked in Google Drive: play it on the media stage. Without it, audio is refused. */
+  onOpenMedia?: (m: { kind: 'audio'; drive: DriveFile }) => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -176,6 +184,12 @@ export default function Board({
   const fileInput = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const [picking, setPicking] = useState(false);
+  /** "From Google Drive" is in the Add menu only when Google is configured. */
+  const driveEnabled = googleConfig() !== null;
+  /** The Drive file whose download needs a new token; the Reconnect button retries it. */
+  const [reauthFile, setReauthFile] = useState<DriveFile | null>(null);
+  /** The latest progress, for a Drive pick that finishes after a paste or drop started another add. */
+  const progressRef = useRef(progress);
 
   // Latest onError without re-running effects when the parent passes a new function.
   const reportError = useEffectEvent((key: MessageKey) => onError(key));
@@ -185,7 +199,13 @@ export default function Board({
   useEffect(() => {
     onErrorRef.current = onError;
     visibleRef.current = visible;
+    progressRef.current = progress;
   });
+
+  // Loads Google sign-in now, so the first "From Google Drive" click opens its pop-up inside the click.
+  useEffect(() => {
+    if (googleConfig()) void preloadDriveAuth();
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
 
   /** Image downloads in flight, so a `file` message and a missing-file lookup never fetch one twice. */
@@ -726,6 +746,54 @@ export default function Board({
     }
   }
 
+  /**
+   * Adds a picked Drive file: a PDF (or a Google Doc / Slides exported as PDF) or an image goes the
+   * upload's way, checks included; audio goes to the media stage. Runs after the pick, outside the
+   * click, so the download never opens a pop-up: a missing token shows the Reconnect button.
+   */
+  async function addDriveFile(file: DriveFile) {
+    const c = classifyDriveFile(file);
+    if (c.kind === 'reject') return onError(c.reason);
+    if (c.kind === 'audio') {
+      if (onOpenMedia) onOpenMedia({ kind: 'audio', drive: file });
+      else onError('drive.unsupported'); // no media stage to play it on
+      return;
+    }
+    if (progressRef.current !== null) return onError('board.busy');
+    setProgress(t('drive.downloading'));
+    let downloaded: File;
+    try {
+      downloaded = await downloadDriveFile(file);
+    } catch (err) {
+      setProgress(null);
+      if (err instanceof DriveReauthRequired) setReauthFile(file);
+      else onError(driveErrorKey(err));
+      return;
+    }
+    setProgress(null); // onFile sets its own, or reports a failed check
+    await onFile(downloaded);
+  }
+
+  function onDrive() {
+    setReauthFile(null);
+    // Called first, with no await before it: a Google sign-in pop-up must open inside this click.
+    void openDrivePicker().then(
+      (file) => (file ? addDriveFile(file) : undefined),
+      (err: unknown) => onError(driveErrorKey(err)),
+    );
+  }
+
+  function onReconnectDrive() {
+    const file = reauthFile;
+    if (!file) return;
+    setReauthFile(null);
+    // Called first, with no await before it: the sign-in pop-up must open inside this click.
+    void getDriveToken().then(
+      () => addDriveFile(file),
+      (err: unknown) => onError(driveErrorKey(err)),
+    );
+  }
+
   // Pasted and dropped files go through our upload, so they are stored and reach the other person.
   // Excalidraw's own image tool is off (UIOptions.tools.image), and in 0.18.1 it handles a pasted image
   // file before calling onPaste, so files are caught here, in the capture phase, before it sees them.
@@ -811,6 +879,17 @@ export default function Board({
             </span>
           )}
           {progress && <span role="status" className="card px-3 py-1.5 text-sm">{progress}</span>}
+          {reauthFile && (
+            <div role="status" className="card flex flex-wrap items-center gap-2 px-3 py-1.5 text-sm">
+              <span>{t('drive.reconnectNeeded')}</span>
+              <button type="button" className="btn btn-primary btn-sm" onClick={onReconnectDrive}>
+                {t('drive.reconnect')}
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" aria-label={t('common.dismiss')} onClick={() => setReauthFile(null)}>
+                <CloseIcon />
+              </button>
+            </div>
+          )}
           <AddMenu
             open={menuOpen}
             onOpenChange={setMenuOpen}
@@ -818,6 +897,7 @@ export default function Board({
             disabled={progress !== null}
             onUpload={() => fileInput.current?.click()}
             onDocuments={() => setPicking(true)}
+            onDrive={driveEnabled ? onDrive : undefined}
           />
           <input
             ref={fileInput}
@@ -877,7 +957,7 @@ export default function Board({
   );
 }
 
-/** The board's Add button: a small menu with Upload and From my documents. */
+/** The board's Add button: a small menu with Upload, From my documents and (when configured) From Google Drive. */
 function AddMenu({
   open,
   onOpenChange: setOpen,
@@ -885,6 +965,7 @@ function AddMenu({
   disabled,
   onUpload,
   onDocuments,
+  onDrive,
 }: {
   /** Owned by the Board, which closes the menu when an add starts (also by paste or drop). */
   open: boolean;
@@ -893,6 +974,8 @@ function AddMenu({
   disabled: boolean;
   onUpload: () => void;
   onDocuments: () => void;
+  /** Hidden without it. Runs inside the click (choose calls it synchronously), for Google's pop-up. */
+  onDrive?: () => void;
 }) {
   const t = useT();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -969,6 +1052,11 @@ function AddMenu({
           <button type="button" role="menuitem" tabIndex={-1} className={item} onClick={() => choose(onDocuments)}>
             {t('board.addFromDocuments')}
           </button>
+          {onDrive && (
+            <button type="button" role="menuitem" tabIndex={-1} className={item} onClick={() => choose(onDrive)}>
+              {t('board.addFromDrive')}
+            </button>
+          )}
         </div>
       )}
     </div>

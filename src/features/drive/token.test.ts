@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createGisAuth, createTokenCache, DRIVE_SCOPE, DriveAuthError, gisTokenResult, type OAuth2Api, tokenValid } from './token';
+import { createGisAuth, createTokenCache, DRIVE_SCOPE, DriveAuthError, DriveReauthRequired, gisTokenResult, type OAuth2Api, tokenValid } from './token';
 
 describe('tokenValid', () => {
   const now = 1_000_000;
@@ -118,6 +118,46 @@ describe('createTokenCache', () => {
     resolve({ accessToken: 'stale', expiresAt: 3_600_000 });
     expect(await first).toBe('stale');
     expect(await cache.get()).toBe('fresh');
+  });
+});
+
+describe('createTokenCache cached() (no pop-up, for downloads after the pick)', () => {
+  it('rejects with DriveReauthRequired without asking when there is no token', async () => {
+    const request = vi.fn();
+    const cache = createTokenCache(request, () => 0);
+    await expect(cache.cached()).rejects.toBeInstanceOf(DriveReauthRequired);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('returns a valid token, and rejects without asking once it is within the expiry margin', async () => {
+    let now = 0;
+    const request = vi.fn().mockResolvedValue({ accessToken: 'a', expiresAt: 3_600_000 });
+    const cache = createTokenCache(request, () => now);
+    expect(await cache.get()).toBe('a');
+    expect(await cache.cached()).toBe('a');
+    now = 3_540_000; // exactly one minute left: get() would open a pop-up here
+    await expect(cache.cached()).rejects.toBeInstanceOf(DriveReauthRequired);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects without asking after clear() (Drive answered 401)', async () => {
+    const request = vi.fn().mockResolvedValue({ accessToken: 'a', expiresAt: 3_600_000 });
+    const cache = createTokenCache(request, () => 0);
+    await cache.get();
+    cache.clear();
+    await expect(cache.cached()).rejects.toBeInstanceOf(DriveReauthRequired);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('joins a request already started from a click instead of starting one', async () => {
+    let resolve!: (t: { accessToken: string; expiresAt: number }) => void;
+    const request = vi.fn(() => new Promise<{ accessToken: string; expiresAt: number }>((r) => (resolve = r)));
+    const cache = createTokenCache(request, () => 0);
+    void cache.get();
+    const joined = cache.cached();
+    resolve({ accessToken: 'a', expiresAt: 3_600_000 });
+    expect(await joined).toBe('a');
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
 
