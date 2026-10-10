@@ -14,6 +14,18 @@ export class DriveExportTooLarge extends Error {
   }
 }
 
+/**
+ * Drive answered 401: the token expired or was revoked. The token is already cleared. Show a
+ * "Reconnect Google Drive" button and retry from its click (a new token needs a pop-up, which
+ * browsers block without a click).
+ */
+export class DriveReauthRequired extends Error {
+  constructor() {
+    super('Google Drive needs to be reconnected');
+    this.name = 'DriveReauthRequired';
+  }
+}
+
 export type DriveFetchDeps = {
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   getToken: () => Promise<string>;
@@ -25,7 +37,7 @@ export type DriveFetch = (path: string, init?: RequestInit) => Promise<Response>
 /**
  * A fetch for `https://www.googleapis.com/drive/v3/<path>` with the Google token. The path is always
  * appended to the Drive API, so the token never goes elsewhere. On a 401 (expired or revoked token)
- * it clears the token, gets a fresh one and retries once.
+ * it clears the token and throws DriveReauthRequired: it never opens a pop-up outside a click.
  */
 export function createDriveFetch(deps: DriveFetchDeps): DriveFetch {
   const send = (url: string, token: string, init?: RequestInit) => {
@@ -38,7 +50,7 @@ export function createDriveFetch(deps: DriveFetchDeps): DriveFetch {
     const res = await send(url, await deps.getToken(), init);
     if (res.status !== 401) return res;
     deps.clearToken();
-    return send(url, await deps.getToken(), init);
+    throw new DriveReauthRequired();
   };
 }
 
@@ -93,6 +105,18 @@ export function pickedFile(doc: unknown): DriveFile | null {
   };
 }
 
+export type PickerOutcome = { done: false } | { done: true; file: DriveFile | null };
+
+/**
+ * What a Picker callback means: keep waiting on `LOADED`; the picked file on `PICKED`; null for
+ * `CANCEL` and any other action, so the promise never hangs.
+ */
+export function pickerOutcome(data: { action: string; docs?: unknown[] }, Action: { PICKED: string; LOADED: string }): PickerOutcome {
+  if (data.action === Action.LOADED) return { done: false };
+  if (data.action === Action.PICKED) return { done: true, file: pickedFile(data.docs?.[0]) };
+  return { done: true, file: null };
+}
+
 let pickerApi: Promise<void> | null = null;
 
 /** Loads `api.js`, then the Picker module, once per page. */
@@ -115,7 +139,8 @@ function loadPicker(): Promise<void> {
 
 /**
  * Opens the Google Drive Picker (files and folders). Resolves with the picked file, or null when the
- * person cancels. `mimeTypes` limits what is shown (e.g. audio only). Browser only.
+ * person cancels (or the Picker reports anything else). Call it from a click: it may need a Google
+ * pop-up for the token. `mimeTypes` limits what is shown (e.g. audio only). Browser only.
  */
 export async function openDrivePicker(opts: { mimeTypes?: readonly string[] } = {}): Promise<DriveFile | null> {
   const config = googleConfig();
@@ -132,13 +157,10 @@ export async function openDrivePicker(opts: { mimeTypes?: readonly string[] } = 
       .setAppId(config.appId)
       .addView(view)
       .setCallback((data) => {
-        if (data.action === api.Action.PICKED) {
-          resolve(pickedFile(data.docs?.[0]));
-          picker.dispose();
-        } else if (data.action === api.Action.CANCEL) {
-          resolve(null);
-          picker.dispose();
-        }
+        const outcome = pickerOutcome(data, api.Action);
+        if (!outcome.done) return;
+        resolve(outcome.file);
+        picker.dispose();
       })
       .build();
     picker.setVisible(true);

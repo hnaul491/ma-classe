@@ -52,6 +52,13 @@ describe('parseYouTubeId', () => {
     expect(parseYouTubeId('https://www.youtube.com/embed/dQw4w9WgXcQ%22')).toBeNull();
   });
 
+  it('rejects a playlist embed (videoseries is 11 characters but not a video)', () => {
+    expect(parseYouTubeId('https://www.youtube.com/embed/videoseries?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG')).toBeNull();
+    expect(parseYouTubeId('https://www.youtube-nocookie.com/embed/videoseries?list=PL123')).toBeNull();
+    expect(parseYouTubeId('https://www.youtube.com/shorts/videoseries')).toBeNull();
+    expect(parseYouTubeId('https://www.youtube.com/watch?v=videoseries')).toBeNull();
+  });
+
   it('rejects other sites, other schemes and random text', () => {
     expect(parseYouTubeId(`https://vimeo.com/watch?v=${ID}`)).toBeNull();
     expect(parseYouTubeId(`https://evil.com/youtu.be/${ID}`)).toBeNull();

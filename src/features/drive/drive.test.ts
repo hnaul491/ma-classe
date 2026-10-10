@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DriveFile } from './classify';
-import { createDriveFetch, downloadDriveFile, DRIVE_API, DriveExportTooLarge, driveErrorReason, pickedFile } from './drive';
+import {
+  createDriveFetch,
+  downloadDriveFile,
+  DRIVE_API,
+  DriveExportTooLarge,
+  driveErrorReason,
+  DriveReauthRequired,
+  pickedFile,
+  pickerOutcome,
+} from './drive';
 
 function deps(responses: Response[], tokens = ['t1', 't2']) {
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -38,24 +47,31 @@ describe('createDriveFetch', () => {
     await createDriveFetch(d)('/files/abc');
     await createDriveFetch(d)('https://evil.example/x');
     expect(d.fetch.mock.calls[0][0]).toBe(`${DRIVE_API}files/abc`);
-    expect(d.fetch.mock.calls[1][0].startsWith(DRIVE_API)).toBe(true);
+    expect(d.fetch.mock.calls[1][0]).toBe('https://www.googleapis.com/drive/v3/https://evil.example/x');
   });
 
-  it('on a 401, clears the token, gets a fresh one and retries once', async () => {
-    const d = deps([new Response('', { status: 401 }), new Response('ok')]);
-    const res = await createDriveFetch(d)('files/abc');
-    expect(res.status).toBe(200);
+  it('on a 401, clears the token and throws DriveReauthRequired (no pop-up without a click)', async () => {
+    const d = deps([new Response('', { status: 401 })]);
+    await expect(createDriveFetch(d)('files/abc')).rejects.toBeInstanceOf(DriveReauthRequired);
     expect(d.clearToken).toHaveBeenCalledTimes(1);
-    expect(d.fetch).toHaveBeenCalledTimes(2);
+    expect(d.fetch).toHaveBeenCalledTimes(1);
+    expect(d.getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('after a reconnect (a later call, from a click) it uses the fresh token', async () => {
+    const d = deps([new Response('', { status: 401 }), new Response('ok')]);
+    const fetchDrive = createDriveFetch(d);
+    await expect(fetchDrive('files/abc')).rejects.toMatchObject({ name: 'DriveReauthRequired' });
+    const res = await fetchDrive('files/abc');
+    expect(res.status).toBe(200);
     expect(auth(d.fetch.mock.calls[0][1])).toBe('Bearer t1');
     expect(auth(d.fetch.mock.calls[1][1])).toBe('Bearer t2');
   });
 
-  it('retries only once: a second 401 is returned to the caller', async () => {
-    const d = deps([new Response('', { status: 401 }), new Response('', { status: 401 })]);
-    const res = await createDriveFetch(d)('files/abc');
-    expect(res.status).toBe(401);
-    expect(d.fetch).toHaveBeenCalledTimes(2);
+  it('downloadDriveFile passes DriveReauthRequired through', async () => {
+    const d = deps([new Response('', { status: 401 })]);
+    const f: DriveFile = { id: 'p1', name: 'a.pdf', mimeType: 'application/pdf', sizeBytes: 1 };
+    await expect(downloadDriveFile(f, createDriveFetch(d))).rejects.toBeInstanceOf(DriveReauthRequired);
   });
 
   it('does not retry other errors', async () => {
@@ -151,5 +167,28 @@ describe('pickedFile', () => {
 
   it('defaults a missing name and mime to empty strings', () => {
     expect(pickedFile({ id: 'a' })).toEqual({ id: 'a', name: '', mimeType: '', sizeBytes: null });
+  });
+});
+
+describe('pickerOutcome', () => {
+  const Action = { PICKED: 'picked', CANCEL: 'cancel', LOADED: 'loaded' };
+  const doc = { id: 'a', name: 'n.pdf', mimeType: 'application/pdf', sizeBytes: '10' };
+
+  it('keeps waiting while the Picker only reports it has loaded', () => {
+    expect(pickerOutcome({ action: 'loaded' }, Action)).toEqual({ done: false });
+  });
+
+  it('settles with the picked file', () => {
+    expect(pickerOutcome({ action: 'picked', docs: [doc] }, Action)).toEqual({
+      done: true,
+      file: { id: 'a', name: 'n.pdf', mimeType: 'application/pdf', sizeBytes: 10 },
+    });
+  });
+
+  it('settles with null on cancel, a pick without documents, or any other action (never hangs)', () => {
+    expect(pickerOutcome({ action: 'cancel' }, Action)).toEqual({ done: true, file: null });
+    expect(pickerOutcome({ action: 'picked', docs: [] }, Action)).toEqual({ done: true, file: null });
+    expect(pickerOutcome({ action: 'picked' }, Action)).toEqual({ done: true, file: null });
+    expect(pickerOutcome({ action: 'error' }, Action)).toEqual({ done: true, file: null });
   });
 });

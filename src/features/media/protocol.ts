@@ -1,4 +1,4 @@
-import { AUDIO_MIMES } from '@/features/drive/classify';
+import { AUDIO_MIMES } from '@/features/drive/limits';
 
 export const MEDIA_TOPIC = 'ma-classe-media';
 
@@ -104,5 +104,6 @@ export function parseYouTubeId(input: string): string | null {
     if (segments.length === 1 && segments[0] === 'watch') id = url.searchParams.get('v');
     else if (segments.length === 2 && (segments[0] === 'shorts' || segments[0] === 'embed')) id = segments[1];
   }
-  return id !== null && YOUTUBE_ID.test(id) ? id : null;
+  // `embed/videoseries?list=…` is a playlist embed: 11 characters, but not a video id.
+  return id !== null && id !== 'videoseries' && YOUTUBE_ID.test(id) ? id : null;
 }
