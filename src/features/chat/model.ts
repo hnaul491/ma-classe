@@ -20,9 +20,17 @@ export function prepareMessage(raw: string): { ok: true; body: string } | { ok: 
   return { ok: true, body };
 }
 
+/** Wire form: explicit fields only, so the local status (or anything else) never leaks. */
 export function encodeChat(m: ChatMessage): string {
-  const { status: _status, ...wire } = m;
-  return JSON.stringify({ v: 1, ...wire });
+  return JSON.stringify({
+    v: 1,
+    id: m.id,
+    lessonId: m.lessonId,
+    authorEmail: m.authorEmail,
+    authorName: m.authorName,
+    body: m.body,
+    createdAt: m.createdAt,
+  });
 }
 
 export function decodeChat(text: string, lessonId: string): ChatMessage | null {
@@ -39,10 +47,11 @@ export function decodeChat(text: string, lessonId: string): ChatMessage | null {
   if (typeof m.authorEmail !== 'string' || typeof m.authorName !== 'string') return null;
   if (typeof m.body !== 'string' || m.body.length < 1 || m.body.length > MAX_CHAT) return null;
   if (typeof m.createdAt !== 'string' || Number.isNaN(Date.parse(m.createdAt))) return null;
-  return { id: m.id, lessonId, authorEmail: m.authorEmail, authorName: m.authorName, body: m.body, createdAt: m.createdAt };
+  return { id: m.id.toLowerCase(), lessonId, authorEmail: m.authorEmail, authorName: m.authorName, body: m.body, createdAt: m.createdAt };
 }
 
-const rank = (s: ChatMessage['status']) => (s === 'saved' ? 2 : s === undefined ? 1 : 0);
+/** No status (a live copy) ranks lowest so an echo never hides a failed save; saved ranks highest. */
+const rank = (s: ChatMessage['status']) => (s === 'saved' ? 2 : s === undefined ? 0 : 1);
 
 export function mergeMessages(a: readonly ChatMessage[], b: readonly ChatMessage[]): ChatMessage[] {
   const byId = new Map<string, ChatMessage>();
@@ -50,34 +59,43 @@ export function mergeMessages(a: readonly ChatMessage[], b: readonly ChatMessage
     const prev = byId.get(m.id);
     if (!prev || rank(m.status) >= rank(prev.status)) byId.set(m.id, m);
   }
-  return [...byId.values()].sort((x, y) => x.createdAt.localeCompare(y.createdAt) || x.id.localeCompare(y.id));
+  return [...byId.values()].sort(
+    (x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
+  );
 }
 
 export type Segment = { kind: 'text'; text: string } | { kind: 'link'; href: string; text: string };
 
 const LINK = /https?:\/\/[^\s<>"]+/g;
-const TRAILING = /[.,;:!?)\]]+$/;
+/** Punctuation that ends the sentence rather than the link. */
+const TRAILING = new Set(['.', ',', ';', ':', '!', '?', ')', ']', '»', '…', '。', '’']);
+const BARE = /^https?:\/\/$/;
+
+const count = (s: string, ch: string) => s.split(ch).length - 1;
+
+function trimLink(url: string): string {
+  while (url.length > 0 && TRAILING.has(url[url.length - 1])) {
+    // A ")" that closes a "(" inside the link belongs to it (Wikipedia-style URLs).
+    if (url.endsWith(')') && count(url, '(') >= count(url, ')')) break;
+    url = url.slice(0, -1);
+  }
+  return url;
+}
 
 export function linkify(body: string): Segment[] {
   const out: Segment[] = [];
   let last = 0;
   for (const match of body.matchAll(LINK)) {
-    let url = match[0];
-    const trail = url.match(TRAILING)?.[0] ?? '';
-    url = url.slice(0, url.length - trail.length);
+    const url = trimLink(match[0]);
+    // "https://" with nothing after it stays text (it is picked up by the next text slice).
+    if (BARE.test(url)) continue;
     const start = match.index ?? 0;
     if (start > last) out.push({ kind: 'text', text: body.slice(last, start) });
     out.push({ kind: 'link', href: url, text: url });
     last = start + url.length;
   }
   if (last < body.length) out.push({ kind: 'text', text: body.slice(last) });
-  // Merge adjacent text segments (trailing punctuation splits them).
-  return out.reduce<Segment[]>((acc, s) => {
-    const prev = acc[acc.length - 1];
-    if (prev?.kind === 'text' && s.kind === 'text') prev.text += s.text;
-    else acc.push({ ...s });
-    return acc;
-  }, []);
+  return out;
 }
 
 export function shouldSendOnKey(e: { key: string; shiftKey: boolean; isComposing: boolean }): boolean {
