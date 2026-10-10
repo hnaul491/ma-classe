@@ -10,7 +10,7 @@ import { withTimeout } from '@/features/board/retry';
 import { ChatPanel } from '@/features/chat/ChatPanel';
 import { ChatToast } from '@/features/chat/ChatToast';
 import { initialToast, previewText, shouldNotify, toastReducer } from '@/features/chat/notify';
-import { playDing, useChatMuted } from '@/features/chat/sound';
+import { playDing, useAudioUnlock, useChatMuted } from '@/features/chat/sound';
 import { useChat } from '@/features/chat/useChat';
 import { useTabTitle } from '@/features/chat/useTabTitle';
 import type { BoardHandle } from '@/features/stage/Board';
@@ -38,6 +38,7 @@ import {
 import { StatusBar, useReconnectingSince } from './StatusBar';
 import { useAutoHide } from './useAutoHide';
 import { useFullscreen } from './useFullscreen';
+import { useMediaQuery } from './useMediaQuery';
 import { useToast } from './useToast';
 
 const Board = dynamic(() => import('@/features/stage/Board'), { ssr: false });
@@ -78,7 +79,16 @@ export function RoomShell({
   const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
   const reconnectingSince = useReconnectingSince();
   // Personal: each person opens and closes their own chat; it is not synced.
-  const [chatOpen, setChatOpen] = useState(false);
+  // On board and screen stages (outside fullscreen, from sm up) the chat is docked under the cameras and
+  // open by default; the Chat button folds it. Elsewhere it is the overlay panel, closed by default.
+  const wide = useMediaQuery('(min-width: 640px)');
+  const railShown = visible !== 'cameras' && !fsActive;
+  const docked = railShown && wide;
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [dockFolded, setDockFolded] = useState(false);
+  const chatOpen = docked ? !dockFolded : overlayOpen;
+  const [draft, setDraft] = useState('');
+  useAudioUnlock();
   const [toast, dispatchToast] = useReducer(toastReducer, initialToast);
   const [chatMuted, toggleChatMuted] = useChatMuted();
   const chat = useChat(lessonId, member, (m) => {
@@ -86,23 +96,34 @@ export function RoomShell({
     dispatchToast({ type: 'new', name: m.authorName, text: previewText(m.body) });
     void playDing();
   });
-  useTabTitle(chat.unread);
+  // A docked, visible chat counts as read.
+  useTabTitle(docked && chatOpen ? 0 : chat.unread);
   const chatButton = useRef<HTMLButtonElement>(null);
   const { markRead } = chat;
   // Opening shows everything, and closing counts what arrived while it was open as read.
   const toggleChat = useCallback(() => {
-    setChatOpen((o) => !o);
+    if (docked) setDockFolded((f) => !f);
+    else setOverlayOpen((o) => !o);
     dispatchToast({ type: 'open' });
     markRead();
-  }, [markRead]);
+  }, [docked, markRead]);
   const openChatFromToast = useCallback(() => {
-    setChatOpen(true);
+    if (docked) setDockFolded(false);
+    else setOverlayOpen(true);
     dispatchToast({ type: 'open' });
     markRead();
-  }, [markRead]);
+  }, [docked, markRead]);
   const dismissToast = useCallback(() => dispatchToast({ type: 'dismiss' }), []);
+  const closeToast = useCallback(() => {
+    dispatchToast({ type: 'dismiss' });
+    chatButton.current?.focus();
+  }, []);
+  // Messages that arrive while the dock is on screen are read as they come.
+  useEffect(() => {
+    if (docked && !dockFolded) markRead();
+  }, [docked, dockFolded, chat.messages, markRead]);
   const closeChat = useCallback(() => {
-    setChatOpen(false);
+    setOverlayOpen(false);
     markRead();
     chatButton.current?.focus();
   }, [markRead]);
@@ -233,16 +254,36 @@ export function RoomShell({
   }, [room, showToast, t]);
 
   // The camera rail (w-44) is shown on board and screen stages outside fullscreen.
-  const railShown = visible !== 'cameras' && !fsActive;
-  const chatRight = railShown ? 'right-0 sm:right-44' : 'right-0';
-  // Keep the fullscreen button clear of the open panel (panel w-80 + p-2 on each side = 21rem, plus a gap).
-  const fsButtonRight = chatOpen
-    ? railShown
-      ? 'right-48 sm:right-[32.5rem]'
-      : 'right-3 sm:right-[21.5rem]'
-    : railShown
-      ? 'right-48'
-      : 'right-3';
+  const dockOpen = docked && chatOpen;
+  // Keep the fullscreen button clear of the open overlay panel (w-80 + p-2 on each side = 21rem, plus a gap).
+  const fsButtonRight = chatOpen && !docked ? 'right-3 sm:right-[21.5rem]' : 'right-3';
+  const chatPanel = (
+    <ChatPanel
+      open={chatOpen}
+      onClose={closeChat}
+      messages={chat.messages}
+      send={chat.send}
+      member={member}
+      history={chat.history}
+      muted={chatMuted}
+      onToggleMuted={toggleChatMuted}
+      docked={docked}
+      draft={draft}
+      onDraftChange={setDraft}
+    />
+  );
+  const fullscreenButton = (cls: string) => (
+    <button
+      type="button"
+      onClick={() => void toggleFs()}
+      // On the board, F is Excalidraw's frame tool, so the hint does not mention it.
+      title={fsActive ? t('room.exitFullscreenHint') : fullscreenKeyEnabled(visible) ? t('room.fullscreenHint') : t('room.fullscreen')}
+      aria-label={fsActive ? t('room.exitFullscreen') : t('room.fullscreen')}
+      className={`flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${cls}`}
+    >
+      {fsActive ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+    </button>
+  );
 
   const renderBar = (compact: boolean) => (
     <ControlBar
@@ -285,49 +326,39 @@ export function RoomShell({
           (fsActive ? (
             <FloatingCams />
           ) : (
-            <aside className="w-44 shrink-0 overflow-y-auto border-l border-line bg-surface">
-              <CameraTiles variant="rail" />
+            <aside
+              className={`flex shrink-0 flex-col border-l border-line bg-surface ${dockOpen ? 'w-72' : 'w-44 overflow-y-auto'}`}
+            >
+              {/* Over the board's top-right Library button was a collision: the button lives in the rail instead. */}
+              <div className="flex shrink-0 justify-start px-2 pt-2">{fullscreenButton('')}</div>
+              <div className="shrink-0">
+                <CameraTiles variant={dockOpen ? 'dock' : 'rail'} />
+              </div>
+              {docked && chatPanel}
             </aside>
           ))}
 
-        {(!fsActive || barVisible) && (
-          <button
-            type="button"
-            onClick={() => void toggleFs()}
-            // On the board, F is Excalidraw's frame tool, so the hint does not mention it.
-            title={fsActive ? t('room.exitFullscreenHint') : fullscreenKeyEnabled(visible) ? t('room.fullscreenHint') : t('room.fullscreen')}
-            aria-label={fsActive ? t('room.exitFullscreen') : t('room.fullscreen')}
-            className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${fsButtonRight}`}
-          >
-            {fsActive ? <ExitFullscreenIcon /> : <FullscreenIcon />}
-          </button>
-        )}
+        {!railShown && (!fsActive || barVisible) && fullscreenButton(`absolute top-3 z-10 ${fsButtonRight}`)}
 
         {/* Over the right of the stage on every stage and in fullscreen, never over the control bar:
             the bar is outside this box normally, and in fullscreen the panel stops above it.
             Beside the camera rail, not over it; on a phone it takes the whole width. */}
-        <div className={chatOpen ? `absolute top-0 z-20 w-full p-2 sm:w-auto ${chatRight} ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
-          <ChatPanel
-            open={chatOpen}
-            onClose={closeChat}
-            messages={chat.messages}
-            send={chat.send}
-            member={member}
-            history={chat.history}
-            muted={chatMuted}
-            onToggleMuted={toggleChatMuted}
-          />
-        </div>
-
-        <ChatToast state={toast} onOpen={openChatFromToast} onDismiss={dismissToast} />
+        {!docked && (
+          <div className={overlayOpen ? `absolute right-0 top-0 z-20 w-full p-2 sm:w-auto ${fsActive ? 'bottom-20' : 'bottom-0'}` : 'hidden'}>
+            {chatPanel}
+          </div>
+        )}
 
         {fsActive && barVisible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
 
-        {toastMessage && (
-          <div role="status" className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-ink px-4 py-1.5 text-sm text-paper shadow">
-            {toastMessage}
-          </div>
-        )}
+        <div className="pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 flex-col items-center gap-2">
+          {toastMessage && (
+            <div role="status" className="rounded-full bg-ink px-4 py-1.5 text-sm text-paper shadow">
+              {toastMessage}
+            </div>
+          )}
+          <ChatToast state={toast} onOpen={openChatFromToast} onDismiss={dismissToast} onClose={closeToast} />
+        </div>
       </div>
       {!fsActive && renderBar(false)}
       <RoomAudioRenderer />

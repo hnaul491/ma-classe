@@ -16,7 +16,7 @@ function CameraTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
         <VideoTrack trackRef={trackRef} className={`h-full w-full object-cover ${p.isLocal ? '-scale-x-100' : ''}`} />
       ) : (
         <div className="flex h-full items-center justify-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-soft text-lg font-semibold text-blue">
+          <span className="flex size-10 items-center justify-center rounded-full bg-blue-soft text-lg font-semibold text-blue">
             {name.charAt(0).toUpperCase()}
           </span>
         </div>
@@ -26,14 +26,16 @@ function CameraTile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   );
 }
 
-export function CameraTiles({ variant }: { variant: 'stage' | 'rail' }) {
+export function CameraTiles({ variant }: { variant: 'stage' | 'rail' | 'dock' }) {
   const tracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], { onlySubscribed: false });
   return (
     <div
       className={
         variant === 'stage'
           ? 'grid h-full w-full grid-cols-1 content-center gap-3 p-4 sm:grid-cols-2'
-          : 'flex flex-col gap-2 p-2'
+          : variant === 'dock'
+            ? 'grid grid-cols-2 gap-2 p-2'
+            : 'flex flex-col gap-2 p-2'
       }
     >
       {tracks.map((t) => (

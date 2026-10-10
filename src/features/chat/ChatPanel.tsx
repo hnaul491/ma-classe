@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
+import { BellIcon, BellOffIcon } from '@/features/room/icons';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { Member } from '@/lib/lessons/types';
 import {
@@ -45,6 +46,9 @@ export function ChatPanel({
   history = 'ready',
   muted = false,
   onToggleMuted,
+  docked = false,
+  draft,
+  onDraftChange,
 }: {
   open: boolean;
   onClose: () => void;
@@ -54,10 +58,15 @@ export function ChatPanel({
   history?: HistoryState;
   muted?: boolean;
   onToggleMuted?: () => void;
+  /** Fixed in a column (no overlay card, no close button). */
+  docked?: boolean;
+  /** The draft lives in the parent so the docked and overlay panels share it. */
+  draft: string;
+  onDraftChange: (v: string) => void;
 }) {
   const t = useT();
   const locale = useLocale();
-  const [draft, setDraft] = useState('');
+  const setDraft = onDraftChange;
   const [error, setError] = useState<'chat.empty' | 'chat.tooLong' | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -78,9 +87,11 @@ export function ChatPanel({
     if (open) stickToBottom();
   }, [messages, open]);
 
-  // Opening the panel puts the cursor in the message box.
+  // Opening the panel puts the cursor in the message box (not when it simply starts out open).
+  const wasOpen = useRef(open);
   useEffect(() => {
-    if (open) input.current?.focus();
+    if (open && !wasOpen.current) input.current?.focus();
+    wasOpen.current = open;
   }, [open]);
 
   // Grow from 1 to 4 lines, then scroll inside the box.
@@ -116,7 +127,15 @@ export function ChatPanel({
   const emptyNote = history === 'loading' ? 'chat.loading' : history === 'failed' ? 'chat.loadFailed' : 'chat.none';
 
   return (
-    <section aria-label={t('chat.title')} hidden={!open} className="card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80">
+    <section
+      aria-label={t('chat.title')}
+      hidden={!open}
+      className={
+        docked
+          ? `${open ? 'flex' : 'hidden'} min-h-0 w-full flex-1 flex-col overflow-hidden border-t border-line`
+          : 'card flex h-full w-full flex-col overflow-hidden shadow-xl sm:w-80'
+      }
+    >
       <header className="flex items-center justify-between border-b border-line px-3 py-2">
         <h2 className="text-sm font-semibold">{t('chat.title')}</h2>
         <div className="flex items-center gap-2">
@@ -125,16 +144,18 @@ export function ChatPanel({
               type="button"
               onClick={onToggleMuted}
               aria-pressed={muted}
-              aria-label={t(muted ? 'chat.muted' : 'chat.sound')}
-              title={t(muted ? 'chat.muted' : 'chat.sound')}
+              aria-label={t('chat.muteSound')}
+              title={t('chat.muteSound')}
               className="btn btn-secondary btn-sm"
             >
-              <span aria-hidden="true">{muted ? '🔇' : '🔔'}</span>
+              {muted ? <BellOffIcon /> : <BellIcon />}
             </button>
           )}
-          <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
-            {t('common.close')}
-          </button>
+          {!docked && (
+            <button type="button" onClick={onClose} className="btn btn-secondary btn-sm">
+              {t('common.close')}
+            </button>
+          )}
         </div>
       </header>
 
