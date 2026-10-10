@@ -106,7 +106,7 @@ The **stage** (main area) shows one thing at a time. Cameras are always visible.
 
 ### Languages
 
-The interface is available in English and French (added 2026-10-10). Each person picks a language with a switch on the login page and the home page. The choice is remembered per browser in a `lang` cookie. Without a cookie, the browser language decides: French if it starts with `fr`, otherwise English. French copy is gender-neutral ("Votre prof", "Votre élève"). Lesson dates are shown in the viewer's language, in Paris time.
+The interface is available in English and French (added 2026-10-10). Each person picks a language with a switch on the login page and the home page. The choice is remembered per browser in a `lang` cookie. Without a cookie, the browser language decides: French if it starts with `fr`, otherwise English. French copy is gender-neutral ("Votre prof", "Votre élève"). Lesson dates are shown in the viewer's language and in the viewer's own time zone (the teacher is in Taiwan, the student in France); the browser reports its time zone in a `tz` cookie, defaulting to Europe/Paris.
 
 ## 6. Board features
 
