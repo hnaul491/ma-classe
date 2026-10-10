@@ -49,9 +49,9 @@ describe('updateWord', () => {
     expect(r).toEqual({ ok: true, value: expect.objectContaining({ id: row.id.toLowerCase(), french: 'été', meaningEn: 'summer' }) });
   });
 
-  it('no row and no error means RLS hid the row: not allowed', async () => {
+  it('no row and no error means the word was deleted meanwhile', async () => {
     db.result = { data: null, error: null };
-    expect(await updateWord(row.id, draft)).toEqual({ ok: false, error: 'vocab.notAllowed' });
+    expect(await updateWord(row.id, draft)).toEqual({ ok: false, error: 'vocab.gone' });
   });
 
   it('an error is mapped to its key', async () => {

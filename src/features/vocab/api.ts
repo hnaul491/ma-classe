@@ -2,7 +2,7 @@ import { withTimeout } from '@/features/board/retry';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 import { fromRow, VOCAB_COLUMNS, type VocabDraft, type VocabRow, type VocabWord } from './model';
 
-export type VocabErrorKey = 'vocab.notReady' | 'vocab.notAllowed' | 'vocab.saveFailed';
+export type VocabErrorKey = 'vocab.notReady' | 'vocab.notAllowed' | 'vocab.saveFailed' | 'vocab.gone';
 export type VocabResult<T> = { ok: true; value: T } | { ok: false; error: VocabErrorKey };
 
 /** A call that has not answered after this long counts as failed. */
@@ -61,7 +61,8 @@ export function updateWord(id: string, draft: VocabDraft): Promise<VocabResult<V
       .maybeSingle();
     if (error) return { ok: false, error: vocabErrorKey(error) };
     // RLS hides a refused update as "0 rows", not as an error.
-    return data ? { ok: true, value: fromRow(data as VocabRow) } : { ok: false, error: 'vocab.notAllowed' };
+    // Both members may update, so no row back means the word was deleted in the meantime.
+    return data ? { ok: true, value: fromRow(data as VocabRow) } : { ok: false, error: 'vocab.gone' };
   });
 }
 

@@ -281,12 +281,16 @@ export function VocabBook({
           aria-label={t('vocab.search')}
           placeholder={t('vocab.search')}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            // A word the search hides must not reopen in edit mode when the search is cleared.
+            setEditing(null);
+          }}
         />
         <button type="button" aria-pressed={hide} onClick={toggleHide} className={`btn btn-sm ${hide ? 'btn-primary' : 'btn-secondary'}`}>
           {t('vocab.hideMeanings')}
         </button>
-        <span className="text-sm tabular-nums text-muted">{t('vocab.count', { n: shown.length })}</span>
+        <span className="text-sm tabular-nums text-muted">{shown.length === 1 ? t('vocab.countOne') : t('vocab.count', { n: shown.length })}</span>
         {teacher && !adding && (
           <button ref={addButton} type="button" onClick={() => setAdding(true)} className="btn btn-secondary btn-sm">
             {t('vocab.add')}

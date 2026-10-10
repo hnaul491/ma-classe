@@ -79,8 +79,12 @@ export function ChatPanel({
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
 
-  // Follow new messages unless the reader has scrolled up.
+  // Follow new messages unless the reader has scrolled up. Coming back from the other tab starts at
+  // the bottom: a hidden list (display:none) loses its scroll position anyway.
+  const wasVisible = useRef(visible);
   useLayoutEffect(() => {
+    if (visible && !wasVisible.current) stick.current = true;
+    wasVisible.current = visible;
     if (visible) stickToBottom();
   }, [messages, visible]);
 
