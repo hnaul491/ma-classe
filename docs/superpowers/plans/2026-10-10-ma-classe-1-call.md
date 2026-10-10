@@ -31,7 +31,7 @@
 - Secrets (`LIVEKIT_API_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`) are server-only. Only `NEXT_PUBLIC_*` values reach the browser.
 - The password login exists only when `NEXT_PUBLIC_ALLOW_PASSWORD_LOGIN=1`. This is set only in local `.env.local` against the **dev** Supabase project. Production never sets it, and the production Supabase project has the Email provider disabled.
 - Pin exact package versions (`--save-exact`).
-- UI copy is plain English, as written in this plan.
+- UI copy: every visible string comes from the English/French dictionaries in `src/lib/i18n/messages.ts` (Task 10A). Each browser picks its language with a `lang` cookie; with no cookie it falls back to the browser language (French if it starts with `fr`, otherwise English). French copy is gender-neutral.
 
 **Inputs required from the user before Task 2:**
 1. The teacher's Google email.
@@ -3122,6 +3122,462 @@ git commit -m "feat(room): wire pre-join, stage sync, screen share and end flow"
 
 ---
 
+### Task 10A: English and French
+
+Added 2026-10-10 at the user's request ("We need to support French"; the user chose "English + French, each person picks"). Every visible string goes through a typed dictionary. Each browser remembers its language in a `lang` cookie. With no cookie, the browser's language decides: French if it starts with `fr`, otherwise English. French copy is gender-neutral ("Votre prof", "Votre élève").
+
+**Files:**
+- Create: `src/lib/i18n/messages.ts`
+- Test: `src/lib/i18n/messages.test.ts`
+- Create: `src/lib/i18n/server.ts`
+- Create: `src/lib/i18n/client.tsx`
+- Create: `src/components/LanguageSwitch.tsx`
+- Modify, replacing hard-coded strings with `t(...)` per the table in Step 6:
+  - `src/app/layout.tsx`
+  - `src/app/login/page.tsx`, `src/app/login/GoogleButton.tsx`, `src/app/login/DevLogin.tsx`
+  - `src/app/page.tsx`
+  - `src/app/lesson/[id]/page.tsx`, `src/app/lesson/[id]/LessonClient.tsx`
+  - `src/lib/lessons/rules.ts`, `src/lib/lessons/rules.test.ts`
+  - `src/features/prejoin/PreJoin.tsx`
+  - `src/features/room/ControlBar.tsx`, `FloatingCams.tsx`, `StatusBar.tsx`, `RoomShell.tsx`
+  - `src/features/stage/CameraTiles.tsx`, `ScreenView.tsx`
+- Modify: `e2e/lesson.spec.ts`, only if Task 12 already exists; otherwise Task 12 includes the French test below.
+
+**Interfaces:**
+- Produces:
+  - `type Locale = 'en' | 'fr'`
+  - `type MessageKey = keyof typeof en`
+  - `translate(locale: Locale, key: MessageKey, vars?: Record<string, string | number>): string`
+  - `pickLocale(cookie: string | undefined, acceptLanguage: string | null): Locale`
+  - `isMessageKey(k: unknown): k is MessageKey`
+  - `formatLessonDate(iso: string, locale: Locale): string`
+  - `getLocale(): Promise<Locale>` (server)
+  - `getT(): Promise<(key: MessageKey, vars?) => string>` (server)
+  - `<LocaleProvider locale>`, `useT()`, `useLocale()` (client)
+  - `<LanguageSwitch />`
+- Changes: `authorizeJoin` failure `reason` becomes a `MessageKey`, and `/api/token` returns `{ error: MessageKey }`.
+
+- [ ] **Step 1: Write the failing tests**
+
+`src/lib/i18n/messages.test.ts`:
+```ts
+import { describe, expect, it } from 'vitest';
+import { en, fr, formatLessonDate, isMessageKey, pickLocale, translate } from './messages';
+
+describe('translate', () => {
+  it('returns the string for the chosen language', () => {
+    expect(translate('en', 'home.startLesson')).toBe('Start lesson');
+    expect(translate('fr', 'home.startLesson')).toBe('Commencer le cours');
+  });
+
+  it('fills {placeholders} and leaves unknown ones visible', () => {
+    expect(translate('fr', 'screen.someoneSharing', { name: 'Teacher' })).toBe('Teacher partage son écran');
+    expect(translate('en', 'screen.someoneSharing')).toBe('{name} is sharing their screen');
+  });
+});
+
+describe('dictionaries', () => {
+  it('French has a non-empty translation for every English key', () => {
+    for (const key of Object.keys(en)) {
+      expect(fr[key as keyof typeof en], key).toBeTruthy();
+    }
+  });
+
+  it('French keeps the same placeholders as English', () => {
+    const vars = (s: string) => (s.match(/\{\w+\}/g) ?? []).sort().join(',');
+    for (const key of Object.keys(en) as (keyof typeof en)[]) {
+      expect(vars(fr[key]), key).toBe(vars(en[key]));
+    }
+  });
+});
+
+describe('pickLocale', () => {
+  it('a saved cookie wins', () => {
+    expect(pickLocale('fr', 'en-US,en;q=0.9')).toBe('fr');
+    expect(pickLocale('en', 'fr-FR')).toBe('en');
+  });
+
+  it('without a cookie, a French browser gets French and everything else English', () => {
+    expect(pickLocale(undefined, 'fr-FR,fr;q=0.9,en;q=0.8')).toBe('fr');
+    expect(pickLocale(undefined, 'vi-VN,vi;q=0.9')).toBe('en');
+    expect(pickLocale(undefined, null)).toBe('en');
+    expect(pickLocale('de', null)).toBe('en');
+  });
+});
+
+describe('isMessageKey', () => {
+  it('accepts only known keys', () => {
+    expect(isMessageKey('join.ended')).toBe(true);
+    expect(isMessageKey('nope')).toBe(false);
+    expect(isMessageKey(42)).toBe(false);
+  });
+});
+
+describe('formatLessonDate', () => {
+  it('formats in Paris time for each language', () => {
+    expect(formatLessonDate('2026-10-14T16:00:00Z', 'en')).toBe('14 Oct');
+    expect(formatLessonDate('2026-10-14T16:00:00Z', 'fr')).toBe('14 oct.');
+  });
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npm test -- src/lib/i18n`
+Expected: FAIL, because the module does not exist yet.
+
+- [ ] **Step 3: Implement the dictionaries and helpers**
+
+`src/lib/i18n/messages.ts`:
+```ts
+export type Locale = 'en' | 'fr';
+
+export const en = {
+  'lang.label': 'Language',
+  'login.private': 'This classroom is private.',
+  'login.failed': 'Sign-in failed. Try again.',
+  'login.google': 'Sign in with Google',
+  'login.devOnly': 'Dev only: password sign-in',
+  'login.email': 'Email',
+  'login.password': 'Password',
+  'login.withPassword': 'Sign in with password',
+  'role.teacher': 'Teacher',
+  'role.student': 'Student',
+  'home.ended': 'The lesson has ended.',
+  'home.inProgress': 'Lesson in progress: {title}',
+  'home.joinLesson': 'Join lesson',
+  'home.startLesson': 'Start lesson',
+  'home.waiting': 'Waiting for your teacher to start the lesson. This page updates by itself.',
+  'home.pastLessons': 'Past lessons',
+  'home.noLessons': 'No lessons yet.',
+  'home.minutes': '{n} min',
+  'lesson.title': 'Lesson {date}',
+  'lesson.ended': 'This lesson has ended.',
+  'lesson.backHome': 'Back to home',
+  'join.signInFirst': 'Sign in first.',
+  'join.private': 'This classroom is private.',
+  'join.notFound': 'This lesson does not exist.',
+  'join.ended': 'This lesson has ended.',
+  'join.cannotJoin': 'You cannot join this lesson.',
+  'join.noAnswer': 'The server did not answer.',
+  'join.failed': 'Could not join.',
+  'join.disconnected': 'You were disconnected. Join again, or use Plan B.',
+  'prejoin.cameraOff': 'Camera is off',
+  'prejoin.camera': 'Camera',
+  'prejoin.defaultCamera': 'Default camera',
+  'prejoin.mic': 'Microphone',
+  'prejoin.defaultMic': 'Default microphone',
+  'prejoin.speaker': 'Speaker',
+  'prejoin.defaultSpeaker': 'Default speaker',
+  'prejoin.micLevel': 'Mic level',
+  'prejoin.testSound': 'Play test sound',
+  'prejoin.teacherIn': 'Teacher is in the room',
+  'prejoin.teacherNotIn': "Teacher hasn't joined yet",
+  'prejoin.studentIn': 'Your student is in the room',
+  'prejoin.studentNotIn': "Your student hasn't joined yet",
+  'prejoin.deviceProblem': 'Camera or microphone problem: {error}. Check browser permissions, then reload.',
+  'prejoin.joining': 'Joining…',
+  'common.openPlanB': 'Open Plan B',
+  'bar.mute': 'Mute microphone',
+  'bar.unmute': 'Unmute microphone',
+  'bar.camOff': 'Turn camera off',
+  'bar.camOn': 'Turn camera on',
+  'bar.share': 'Share screen',
+  'bar.stopShare': 'Stop sharing',
+  'bar.planB': 'Plan B: open Google Meet',
+  'bar.end': 'End lesson',
+  'bar.confirmEnd': 'Click again to end',
+  'bar.clickAgain': 'Click again',
+  'bar.leave': 'Leave',
+  'tile.you': 'You',
+  'cams.show': 'Show cameras',
+  'cams.hide': 'Hide cameras',
+  'status.connecting': 'Connecting…',
+  'status.reconnecting': 'Reconnecting… your work is saved.',
+  'status.disconnected': 'Disconnected.',
+  'screen.none': 'No one is sharing.',
+  'screen.youEntire': 'You are sharing your entire screen.',
+  'screen.you': 'You are sharing your screen.',
+  'screen.previewHidden': 'Your preview is hidden so you don’t see a mirror inside a mirror.',
+  'screen.tipNotifications': 'Tip: turn off notifications so private messages don’t appear on the shared screen.',
+  'screen.someoneSharing': '{name} is sharing their screen',
+  'stage.cameras': 'the cameras',
+  'stage.board': 'the board',
+  'stage.screen': 'a shared screen',
+  'stage.media': 'a video',
+  'room.teacherOpened': 'Teacher opened {stage}',
+  'room.studentOpened': 'Student opened {stage}',
+  'room.shareFailed': 'Screen sharing failed. Try again, or share a single tab.',
+  'room.endFailed': 'Could not end the lesson. Check your connection and try again.',
+  'room.deviceStopped': 'Camera or microphone stopped working. Check it is plugged in, then turn it off and on.',
+  'room.fullscreen': 'Fullscreen',
+  'room.fullscreenHint': 'Fullscreen (F)',
+  'room.exitFullscreen': 'Exit fullscreen',
+  'room.exitFullscreenHint': 'Exit fullscreen (Esc)',
+} as const;
+
+export type MessageKey = keyof typeof en;
+
+export const fr: Record<MessageKey, string> = {
+  'lang.label': 'Langue',
+  'login.private': 'Cette classe est privée.',
+  'login.failed': 'La connexion a échoué. Réessayez.',
+  'login.google': 'Se connecter avec Google',
+  'login.devOnly': 'Dev uniquement : connexion par mot de passe',
+  'login.email': 'E-mail',
+  'login.password': 'Mot de passe',
+  'login.withPassword': 'Se connecter avec un mot de passe',
+  'role.teacher': 'Prof',
+  'role.student': 'Élève',
+  'home.ended': 'Le cours est terminé.',
+  'home.inProgress': 'Cours en direct : {title}',
+  'home.joinLesson': 'Rejoindre le cours',
+  'home.startLesson': 'Commencer le cours',
+  'home.waiting': 'En attente du début du cours. Cette page se met à jour toute seule.',
+  'home.pastLessons': 'Cours précédents',
+  'home.noLessons': 'Aucun cours pour l’instant.',
+  'home.minutes': '{n} min',
+  'lesson.title': 'Cours du {date}',
+  'lesson.ended': 'Ce cours est terminé.',
+  'lesson.backHome': 'Retour à l’accueil',
+  'join.signInFirst': 'Connectez-vous d’abord.',
+  'join.private': 'Cette classe est privée.',
+  'join.notFound': 'Ce cours n’existe pas.',
+  'join.ended': 'Ce cours est terminé.',
+  'join.cannotJoin': 'Vous ne pouvez pas rejoindre ce cours.',
+  'join.noAnswer': 'Le serveur ne répond pas.',
+  'join.failed': 'Impossible de rejoindre le cours.',
+  'join.disconnected': 'La connexion a été perdue. Rejoignez le cours à nouveau ou utilisez le plan B.',
+  'prejoin.cameraOff': 'Caméra coupée',
+  'prejoin.camera': 'Caméra',
+  'prejoin.defaultCamera': 'Caméra par défaut',
+  'prejoin.mic': 'Micro',
+  'prejoin.defaultMic': 'Micro par défaut',
+  'prejoin.speaker': 'Haut-parleur',
+  'prejoin.defaultSpeaker': 'Haut-parleur par défaut',
+  'prejoin.micLevel': 'Niveau du micro',
+  'prejoin.testSound': 'Tester le son',
+  'prejoin.teacherIn': 'Votre prof est dans la salle',
+  'prejoin.teacherNotIn': 'Votre prof n’est pas encore dans la salle',
+  'prejoin.studentIn': 'Votre élève est dans la salle',
+  'prejoin.studentNotIn': 'Votre élève n’est pas encore dans la salle',
+  'prejoin.deviceProblem': 'Problème de caméra ou de micro : {error}. Vérifiez les autorisations du navigateur, puis rechargez la page.',
+  'prejoin.joining': 'Connexion…',
+  'common.openPlanB': 'Ouvrir le plan B',
+  'bar.mute': 'Couper le micro',
+  'bar.unmute': 'Activer le micro',
+  'bar.camOff': 'Couper la caméra',
+  'bar.camOn': 'Activer la caméra',
+  'bar.share': 'Partager l’écran',
+  'bar.stopShare': 'Arrêter le partage',
+  'bar.planB': 'Plan B : ouvrir Google Meet',
+  'bar.end': 'Terminer le cours',
+  'bar.confirmEnd': 'Cliquez encore pour terminer',
+  'bar.clickAgain': 'Confirmer',
+  'bar.leave': 'Quitter',
+  'tile.you': 'Vous',
+  'cams.show': 'Afficher les caméras',
+  'cams.hide': 'Masquer les caméras',
+  'status.connecting': 'Connexion…',
+  'status.reconnecting': 'Reconnexion… votre travail est enregistré.',
+  'status.disconnected': 'Connexion perdue.',
+  'screen.none': 'Personne ne partage son écran.',
+  'screen.youEntire': 'Vous partagez tout votre écran.',
+  'screen.you': 'Vous partagez votre écran.',
+  'screen.previewHidden': 'Votre aperçu est masqué pour éviter l’effet miroir.',
+  'screen.tipNotifications': 'Astuce : désactivez les notifications pour que vos messages privés n’apparaissent pas à l’écran.',
+  'screen.someoneSharing': '{name} partage son écran',
+  'stage.cameras': 'les caméras',
+  'stage.board': 'le tableau',
+  'stage.screen': 'un écran partagé',
+  'stage.media': 'une vidéo',
+  'room.teacherOpened': 'Votre prof a ouvert {stage}',
+  'room.studentOpened': 'Votre élève a ouvert {stage}',
+  'room.shareFailed': 'Le partage d’écran a échoué. Réessayez ou partagez un seul onglet.',
+  'room.endFailed': 'Impossible de terminer le cours. Vérifiez votre connexion et réessayez.',
+  'room.deviceStopped': 'La caméra ou le micro ne fonctionne plus. Vérifiez qu’il est bien branché, puis coupez-le et réactivez-le.',
+  'room.fullscreen': 'Plein écran',
+  'room.fullscreenHint': 'Plein écran (F)',
+  'room.exitFullscreen': 'Quitter le plein écran',
+  'room.exitFullscreenHint': 'Quitter le plein écran (Échap)',
+};
+
+const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };
+
+export function translate(locale: Locale, key: MessageKey, vars?: Record<string, string | number>): string {
+  const template = DICTS[locale][key] ?? en[key];
+  return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
+    vars && name in vars ? String(vars[name]) : whole,
+  );
+}
+
+export function pickLocale(cookie: string | undefined, acceptLanguage: string | null): Locale {
+  if (cookie === 'en' || cookie === 'fr') return cookie;
+  const first = acceptLanguage?.split(',')[0]?.trim().toLowerCase() ?? '';
+  return first.startsWith('fr') ? 'fr' : 'en';
+}
+
+export function isMessageKey(k: unknown): k is MessageKey {
+  return typeof k === 'string' && Object.prototype.hasOwnProperty.call(en, k);
+}
+
+export function formatLessonDate(iso: string, locale: Locale): string {
+  return new Date(iso).toLocaleDateString(locale === 'fr' ? 'fr-FR' : 'en-GB', {
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'Europe/Paris',
+  });
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `npm test -- src/lib/i18n`
+Expected: PASS.
+
+If the `formatLessonDate` French assertion fails only because Node's ICU writes the month differently (for example `14 oct`), update the expected string to match the actual Node 22 output. Note the change in your report.
+
+- [ ] **Step 5: Add the server and client helpers and the switch**
+
+`src/lib/i18n/server.ts`:
+```ts
+import { cookies, headers } from 'next/headers';
+import { pickLocale, translate, type Locale, type MessageKey } from './messages';
+
+export async function getLocale(): Promise<Locale> {
+  const [c, h] = await Promise.all([cookies(), headers()]);
+  return pickLocale(c.get('lang')?.value, h.get('accept-language'));
+}
+
+export async function getT() {
+  const locale = await getLocale();
+  return (key: MessageKey, vars?: Record<string, string | number>) => translate(locale, key, vars);
+}
+```
+
+`src/lib/i18n/client.tsx`:
+```tsx
+'use client';
+
+import { createContext, useCallback, useContext } from 'react';
+import { translate, type Locale, type MessageKey } from './messages';
+
+const LocaleContext = createContext<Locale>('en');
+
+export function LocaleProvider({ locale, children }: { locale: Locale; children: React.ReactNode }) {
+  return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>;
+}
+
+export function useLocale(): Locale {
+  return useContext(LocaleContext);
+}
+
+export function useT() {
+  const locale = useLocale();
+  return useCallback(
+    (key: MessageKey, vars?: Record<string, string | number>) => translate(locale, key, vars),
+    [locale],
+  );
+}
+```
+
+`src/components/LanguageSwitch.tsx`:
+```tsx
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { useLocale, useT } from '@/lib/i18n/client';
+import type { Locale } from '@/lib/i18n/messages';
+
+const OPTIONS: { value: Locale; label: string }[] = [
+  { value: 'en', label: 'English' },
+  { value: 'fr', label: 'Français' },
+];
+
+export function LanguageSwitch() {
+  const router = useRouter();
+  const locale = useLocale();
+  const t = useT();
+
+  function choose(next: Locale) {
+    document.cookie = `lang=${next}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  }
+
+  return (
+    <div role="group" aria-label={t('lang.label')} className="flex gap-1 text-xs">
+      {OPTIONS.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          lang={o.value}
+          aria-pressed={locale === o.value}
+          onClick={() => choose(o.value)}
+          className={`rounded px-2 py-1 ${locale === o.value ? 'bg-ink text-paper' : 'bg-surface-2 text-ink'}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+In `src/app/layout.tsx`:
+1. Make `RootLayout` `async`.
+2. Add `const locale = await getLocale();`.
+3. Set `<html lang={locale}>`.
+4. Wrap `{children}` in `<LocaleProvider locale={locale}>`.
+
+- [ ] **Step 6: Replace every hard-coded string**
+
+Server components use `const t = await getT();`. Client components use `const t = useT();`. Use the key from this table everywhere the English text appears now:
+
+| File | English text now → key |
+|---|---|
+| `login/page.tsx` | "This classroom is private." → `login.private`; "Sign-in failed. Try again." → `login.failed`. Render `<LanguageSwitch />` above the heading. |
+| `login/GoogleButton.tsx` | "Sign in with Google" → `login.google` |
+| `login/DevLogin.tsx` | "Dev only: password sign-in" → `login.devOnly`; "Email" → `login.email`; "Password" → `login.password`; "Sign in with password" → `login.withPassword` |
+| `page.tsx` (home) | Role chip → `role.teacher`/`role.student`; `home.ended`; `home.inProgress` with `{ title }`; `home.joinLesson`; `home.startLesson`; `home.waiting`; `home.pastLessons`; `home.noLessons`; minutes → `home.minutes` with `{ n }`. Render `<LanguageSwitch />` in the header next to the role chip. Lesson titles are displayed as `t('lesson.title', { date: formatLessonDate(l.started_at, locale) })` instead of the stored `title` column (the column stays for history). |
+| `lesson/[id]/page.tsx` | `lesson.ended`, `lesson.backHome` |
+| `lib/lessons/rules.ts` | `reason` values become keys: `'join.signInFirst'`, `'join.private'`, `'join.notFound'`, `'join.ended'`. Type `reason: MessageKey`. Update `rules.test.ts` to expect the keys. The token route already returns `{ error: check.reason }`, so it now returns a key. |
+| `lesson/[id]/LessonClient.tsx` | In `fetchToken`, accept a `t` argument. Translate `body.error` with `isMessageKey(body.error) ? t(body.error) : t('join.cannotJoin')` for 4xx, and use `t('join.noAnswer')` for other failures. `'Could not join.'` → `join.failed`; the disconnected message → `join.disconnected`. |
+| `prejoin/PreJoin.tsx` | `prejoin.cameraOff`, `prejoin.camera`, `prejoin.defaultCamera`, `prejoin.mic`, `prejoin.defaultMic`, `prejoin.speaker`, `prejoin.defaultSpeaker`, `prejoin.micLevel`, `prejoin.testSound`. Presence line: student sees `prejoin.teacherIn`/`prejoin.teacherNotIn`; teacher sees `prejoin.studentIn`/`prejoin.studentNotIn`. Device error → `prejoin.deviceProblem` with `{ error }`. Use `common.openPlanB`, `prejoin.joining`, and `home.joinLesson` for the Join button. |
+| `room/ControlBar.tsx` | `bar.mute`/`bar.unmute`, `bar.camOff`/`bar.camOn`, `bar.share`/`bar.stopShare`, `bar.planB`, `bar.end`/`bar.confirmEnd`/`bar.leave`, and the visible "Click again" → `bar.clickAgain` |
+| `stage/CameraTiles.tsx` | "You" → `tile.you` |
+| `room/FloatingCams.tsx` | `cams.show`, `cams.hide` |
+| `room/StatusBar.tsx` | `status.connecting`, `status.reconnecting`, `status.disconnected`, `common.openPlanB` |
+| `stage/ScreenView.tsx` | `screen.none`, `screen.youEntire`/`screen.you`, `bar.stopShare`, `screen.previewHidden`, `screen.tipNotifications`, `screen.someoneSharing` with `{ name }` |
+| `room/RoomShell.tsx` | Replace the `STAGE_LABEL` record with keys `stage.cameras`/`stage.board`/`stage.screen`/`stage.media`. The toast becomes `t(msg.by === 'teacher' ? 'room.teacherOpened' : 'room.studentOpened', { stage: t(STAGE_KEY[next.stage]) })`. Also use `room.shareFailed`, `room.endFailed`, `room.deviceStopped`, and for the fullscreen button `room.fullscreen`/`room.fullscreenHint`/`room.exitFullscreen`/`room.exitFullscreenHint` (aria-label / title). |
+
+When done, this search should find no visible English UI text left in `src/app` or `src/features`; only log messages, thrown developer errors, and test files remain:
+```bash
+grep -rnE "'[A-Z][a-z]+ [a-z]+[^']*'|>[A-Z][a-z]+ [a-z]" src/app src/features --include=*.tsx | grep -v "t('"
+```
+
+- [ ] **Step 7: Run the tests, typecheck and build**
+
+Run: `npm test && npx tsc --noEmit && npm run build`
+Expected: all PASS. The `rules.test.ts` expectations are now keys.
+
+- [ ] **Step 8: Manual check (part of the deferred two-browser check)**
+
+1. On `/login`, click Français.
+   Expected: "Se connecter avec Google". Reload: it stays French.
+2. Sign in.
+   Expected: the home page shows "Commencer le cours" or "Rejoindre le cours", and past lessons show "Cours du 14 oct.".
+3. Join a lesson with the teacher in French and the student in English.
+   Expected: each sees their own language. The toast reads "Votre prof a ouvert un écran partagé" for a French student, or "Teacher opened a shared screen" for an English one.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add -A
+git commit -m "feat(i18n): English and French UI with per-browser language switch"
+```
+
+---
+
 ### Task 11: Keep-alive and deploy
 
 **Files:**
@@ -3235,6 +3691,7 @@ export default defineConfig({
   workers: 1,
   use: {
     ...devices['Desktop Chrome'],
+    locale: 'en-US',
     baseURL: 'http://localhost:3000',
     launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] },
   },
@@ -3304,6 +3761,14 @@ test('teacher and student meet on camera, then the teacher ends the lesson', asy
   await expect(student.getByText('The lesson has ended.')).toBeVisible();
 });
 
+test('the login page switches to French and remembers it', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Français' }).click();
+  await expect(page.getByRole('button', { name: 'Se connecter avec Google' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Se connecter avec Google' })).toBeVisible();
+});
+
 test('a student cannot join a lesson that has ended', async ({ browser }) => {
   const teacher = await signedInPage(browser, TEACHER);
   await teacher.getByRole('button', { name: 'Start lesson' }).click();
@@ -3327,7 +3792,7 @@ test('a student cannot join a lesson that has ended', async ({ browser }) => {
 npx playwright install chromium
 npm run e2e
 ```
-Expected: 2 passed. These tests use the **dev** Supabase project and LiveKit Cloud; each run costs about 2 participant-minutes.
+Expected: 3 passed. These tests use the **dev** Supabase project and LiveKit Cloud; each run costs about 2 participant-minutes.
 
 - [ ] **Step 4: Commit**
 

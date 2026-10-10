@@ -104,6 +104,10 @@ The **stage** (main area) shows one thing at a time. Cameras are always visible.
 6. **Sharing the entire screen** hides the sharer's own preview (no mirror effect) and shows a tip to turn off notifications.
 7. **Control bar.** Icon-only, the same everywhere, in this order: Mic · Camera | Board · Share · Media | Chat ··· Plan B · End/Leave. Every icon has a tooltip; the active stage icon is highlighted. The teacher's red button is End lesson (saves and closes the lesson); the student's is Leave.
 
+### Languages
+
+The interface is available in English and French (added 2026-10-10). Each person picks a language with a switch on the login page and the home page. The choice is remembered per browser in a `lang` cookie. Without a cookie, the browser language decides: French if it starts with `fr`, otherwise English. French copy is gender-neutral ("Votre prof", "Votre élève"). Lesson dates are shown in the viewer's language, in Paris time.
+
 ## 6. Board features
 
 - **Tools:** Excalidraw defaults (select, pen, text, highlighter, arrow, shapes, eraser) plus the built-in laser pointer.
