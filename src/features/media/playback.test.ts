@@ -4,7 +4,10 @@ import {
   AUTOPLAY_MAX_WAIT_MS,
   AUTOPLAY_TIMEOUT_MS,
   autoplayVerdict,
+  classifyObserved,
   createEchoGuard,
+  createSyncEcho,
+  SYNC_ECHO_TTL_MS,
   routeMessage,
   ECHO_GUARD_MS,
   isAutoplayRejection,
@@ -318,27 +321,109 @@ describe('routeMessage', () => {
   });
 });
 
-describe('missedAction', () => {
-  it('a play pressed inside the window after a remote pause is caught when the window ends', () => {
+describe('missedAction (when the echo guard ends)', () => {
+  it('a play pressed inside the window after a remote pause is still an action', () => {
     const c = clock(1000);
     const g = createEchoGuard(c.now);
     g.begin(); // the remote pause is applied
     c.advance(200); // the person presses play: the event is swallowed
     expect(g.active()).toBe(true);
     c.advance(g.remaining());
-    expect(missedAction(paused, { playing: true, position: 10.2 }, c.now(), false)).toEqual({ playing: true, position: 10.2 });
+    expect(missedAction(paused, { playing: true, position: 10.2 }, c.now(), false)).toEqual({
+      kind: 'action',
+      observed: { playing: true, position: 10.2 },
+    });
+    expect(missedAction(playing, { playing: false, position: 10 }, 1000, false)).toEqual({
+      kind: 'action',
+      observed: { playing: false, position: 10 },
+    });
   });
 
-  it('a seek beyond the threshold inside the window is caught too', () => {
-    expect(missedAction(paused, { playing: false, position: 55 }, 1000, false)).toEqual({ playing: false, position: 55 });
+  it('a player still playing but more than 1 s behind after buffering is a local resync, never an action', () => {
+    // A remote play at 10 s; the player buffered 2.5 s, so the shared target moved on to 12.5 s.
+    expect(missedAction(playing, { playing: true, position: 10 }, 3500, false)).toEqual({ kind: 'resync' });
   });
 
-  it('nothing is missed when the player matches the synced state', () => {
+  it('a position off while paused is a resync too (a seek inside the window may be lost)', () => {
+    expect(missedAction(paused, { playing: false, position: 55 }, 1000, false)).toEqual({ kind: 'resync' });
+  });
+
+  it('nothing to do when the player matches the synced state', () => {
     expect(missedAction(paused, { playing: false, position: 10 }, 1000, false)).toBeNull();
     expect(missedAction(playing, { playing: true, position: 12 }, 3000, false)).toBeNull();
   });
 
-  it('a blocked player (autoplay) has no missed action: it is not the person’s doing', () => {
+  it('a blocked player (autoplay) has nothing to do: it is not the person’s doing', () => {
     expect(missedAction(playing, { playing: false, position: 0 }, 3000, true)).toBeNull();
+  });
+});
+
+describe('classifyObserved (outside the echo guard)', () => {
+  // A heartbeat correction seeked to 10 s at t=1000; the player buffered and reports PLAYING at t=3500.
+  const late = { playing: true, position: 10 };
+
+  it('a late PLAYING after a sync seek or play is never a user seek: resync locally', () => {
+    expect(classifyObserved(playing, late, 'state', 3500, true)).toBe('resync');
+  });
+
+  it('without a sync seek pending, the same PLAYING far from the target is the person’s seek', () => {
+    expect(classifyObserved(playing, late, 'state', 3500, false)).toBe('action');
+  });
+
+  it('a detected seek (time jump, audio seeked) is the person’s, even with a sync pending', () => {
+    expect(classifyObserved(playing, { playing: true, position: 80 }, 'seek', 3500, true)).toBe('action');
+  });
+
+  it('a play/pause flip is always an action', () => {
+    expect(classifyObserved(playing, { playing: false, position: 12 }, 'state', 3000, true)).toBe('action');
+    expect(classifyObserved(paused, { playing: true, position: 10 }, 'state', 3000, true)).toBe('action');
+  });
+
+  it('an event that matches the shared state is ignored', () => {
+    expect(classifyObserved(playing, { playing: true, position: 12.3 }, 'state', 3000, false)).toBe('ignore');
+    expect(classifyObserved({ ...playing, source: null }, { playing: false, position: 0 }, 'state', 3000, false)).toBe('ignore');
+  });
+});
+
+describe('createSyncEcho', () => {
+  it('a sync seek or play stays pending until the PLAYING that follows it settles it', () => {
+    const c = clock();
+    const e = createSyncEcho(c.now);
+    expect(e.pending()).toBe(false);
+    e.mark();
+    c.advance(3000);
+    expect(e.pending()).toBe(true);
+    e.settle();
+    expect(e.pending()).toBe(false);
+  });
+
+  it('expires, so a later PLAYING after the person’s own seek is not taken for an echo', () => {
+    const c = clock();
+    const e = createSyncEcho(c.now);
+    e.mark();
+    c.advance(SYNC_ECHO_TTL_MS);
+    expect(e.pending()).toBe(false);
+  });
+
+  it('allows one local resync per sync: a buffering resync cannot loop', () => {
+    const c = clock();
+    const e = createSyncEcho(c.now);
+    expect(e.takeResync()).toBe(false);
+    e.mark();
+    expect(e.takeResync()).toBe(true);
+    // The resync seek re-arms the echo (its own late PLAYING is not a user seek) but no new budget.
+    e.rearm();
+    expect(e.pending()).toBe(true);
+    expect(e.takeResync()).toBe(false);
+    e.mark(); // the next remote state or heartbeat correction
+    expect(e.takeResync()).toBe(true);
+  });
+
+  it('a local action clears both', () => {
+    const e = createSyncEcho(clock().now);
+    e.mark();
+    e.clear();
+    expect(e.pending()).toBe(false);
+    expect(e.takeResync()).toBe(false);
   });
 });

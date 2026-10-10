@@ -7,7 +7,7 @@ import { useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
 import { audioLoadProblem } from './audioError';
 import { loadObjectUrl } from './objectUrl';
-import { isAutoplayRejection, type Observed, type PlayerControl } from './playback';
+import { isAutoplayRejection, type Observed, type ObservedVia, type PlayerControl } from './playback';
 import type { MediaSource } from './protocol';
 
 type AudioSource = Extract<MediaSource, { kind: 'audio' }>;
@@ -29,7 +29,8 @@ export function AudioPlayer({
   source: AudioSource;
   /** The player's controls once the audio is ready; null when it goes away. */
   onControl: (c: PlayerControl | null) => void;
-  onObserved: (o: Observed) => void;
+  /** `via`: play or pause (`state`), or seeked (`seek`). */
+  onObserved: (o: Observed, via: ObservedVia) => void;
   /** Playback really started (the browser's `playing`): an autoplay mark is stale. */
   onPlaying: () => void;
   onError: (key: MessageKey) => void;
@@ -70,7 +71,7 @@ export function AudioPlayer({
     ).finally(() => setConnecting(false));
   };
 
-  const observe = (el: HTMLAudioElement, playing: boolean) => onObserved({ playing, position: el.currentTime });
+  const observe = (el: HTMLAudioElement, playing: boolean, via: ObservedVia) => onObserved({ playing, position: el.currentTime }, via);
 
   return (
     <div className="card flex w-full max-w-lg flex-col gap-3 p-4">
@@ -122,10 +123,10 @@ export function AudioPlayer({
               },
             });
           }}
-          onPlay={(e) => observe(e.currentTarget, true)}
+          onPlay={(e) => observe(e.currentTarget, true, 'state')}
           onPlaying={() => onPlaying()}
-          onPause={(e) => observe(e.currentTarget, false)}
-          onSeeked={(e) => observe(e.currentTarget, !e.currentTarget.paused)}
+          onPause={(e) => observe(e.currentTarget, false, 'state')}
+          onSeeked={(e) => observe(e.currentTarget, !e.currentTarget.paused, 'seek')}
           onError={() => setLoaded({ key, problem: 'failed' })}
         />
       )}

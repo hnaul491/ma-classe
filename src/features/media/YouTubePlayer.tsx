@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useEffectEvent, useRef } from 'react';
-import { autoplayVerdict, SEEK_POLL_MS, isSeekJump, ytObserved, ytSample, YT_BUFFERING, YT_PLAYING, type Observed, type PlayerControl, type Sample } from './playback';
+import { autoplayVerdict, SEEK_POLL_MS, isSeekJump, ytObserved, ytSample, YT_BUFFERING, YT_PLAYING, type Observed, type ObservedVia, type PlayerControl, type Sample } from './playback';
 import { loadYouTube, YOUTUBE_HOST } from './youtubeApi';
 
 /** How often a pending `playVideo()` checks whether it reached PLAYING. */
@@ -24,7 +24,8 @@ export function YouTubePlayer({
   videoId: string;
   /** The player's controls once it is ready; null when it goes away. */
   onControl: (c: PlayerControl | null) => void;
-  onObserved: (o: Observed) => void;
+  /** `via`: a state change (play, pause) or a detected seek (a jump in the time). */
+  onObserved: (o: Observed, via: ObservedVia) => void;
   /** The player reached PLAYING (even late, after a slow buffer): an autoplay mark is stale. */
   onPlaying: () => void;
   onError: (key: 'media.failed' | 'media.notEmbeddable') => void;
@@ -105,14 +106,14 @@ export function YouTubePlayer({
               control(ctl);
               poll = setInterval(() => {
                 const cur = ytSample(state(), time(), Date.now());
-                if (prev && cur && isSeekJump(prev, cur)) observed({ playing: cur.playing, position: cur.position });
+                if (prev && cur && isSeekJump(prev, cur)) observed({ playing: cur.playing, position: cur.position }, 'seek');
                 prev = cur;
               }, SEEK_POLL_MS);
             },
             onStateChange: (e) => {
               for (const check of [...pending]) check();
               const o = ytObserved(e.data, time());
-              if (o) observed(o);
+              if (o) observed(o, 'state');
               // After the event above, so a late autoplay is not mistaken for the person's play.
               if (e.data === YT_PLAYING) nowPlaying();
             },

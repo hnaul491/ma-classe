@@ -9,14 +9,16 @@ import { preloadDriveAuth } from '@/features/drive/token';
 import { AudioPlayer } from '@/features/media/AudioPlayer';
 import {
   applyPlan,
+  classifyObserved,
   createEchoGuard,
-  isLocalChange,
+  createSyncEcho,
   missedAction,
   routeMessage,
   shouldHeartbeat,
   sourceKey,
   stateMessage,
   type Observed,
+  type ObservedVia,
   type PlayerControl,
 } from '@/features/media/playback';
 import { parseYouTubeId, type MediaMessage, type MediaSource } from '@/features/media/protocol';
@@ -31,6 +33,8 @@ import type { Member } from '@/lib/lessons/types';
 
 /** Names and titles travel at most this long (as in the protocol). */
 const MAX_NAME = 200;
+
+type MediaSend = ReturnType<typeof useMediaChannel>['send'];
 
 /** What RoomShell may ask of the media stage. */
 export type MediaHandle = {
@@ -59,6 +63,12 @@ export default function MediaStage({
   /** The ready player, with the media it plays. */
   const control = useRef<{ key: string; c: PlayerControl } | null>(null);
   const [guard] = useState(() => createEchoGuard());
+  /** "The last seek was ours (sync), not the person's", and the one local resync it allows. */
+  const [echo] = useState(() => createSyncEcho());
+  /** The channel's `send`, for the actions (the hook is called below them). */
+  const sendRef = useRef<MediaSend | null>(null);
+  /** A check queued for when the echo guard ends. */
+  const recheck = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The media whose autoplay was blocked: "Click to play" covers its player. */
   const [blockedFor, setBlockedFor] = useState<string | null>(null);
   const blockedRef = useRef<string | null>(null);
@@ -94,30 +104,59 @@ export default function MediaStage({
     return s.playing && !c.playing() ? null : c.position();
   };
 
-  const { send } = useMediaChannel((msg: MediaMessage, from: string) => {
-    const prev = stateRef.current;
-    const r = routeMessage(prev, msg, from, { self: role, position: livePosition(), now: Date.now() });
-    // A media-req answer, or my state for someone whose state is stale.
-    if (r.reply) void send(r.reply.msg, { to: r.reply.to }).catch(() => {});
-    if (r.next === prev) return;
-    commit(r.next);
-    if (!r.next.playing) block(null);
-    // A new media mounts a new player, which syncs when ready.
-    if (r.syncPlayer) syncPlayer();
-  });
+  /**
+   * When the guard ends: a play or pause the person took inside it is an action; a position off by the
+   * buffering time of our own seek or play is only a local resync.
+   */
+  function checkAfterGuard() {
+    if (recheck.current) return;
+    const left = guard.remaining();
+    recheck.current = setTimeout(
+      () => {
+        recheck.current = null;
+        if (guard.active()) return checkAfterGuard();
+        const c = player();
+        const s = stateRef.current;
+        if (!c || !s.source) return;
+        const missed = missedAction(s, { playing: c.playing(), position: c.position() }, Date.now(), blockedRef.current === sourceKey(s.source));
+        if (missed?.kind === 'action') act({ source: s.source, ...missed.observed });
+        else if (missed?.kind === 'resync') resync();
+        // Paused: no PLAYING will come to settle the echo.
+        if (!stateRef.current.playing) echo.settle();
+      },
+      // While a play is pending, look again shortly; otherwise just after the window.
+      left === Infinity ? 250 : left + 20,
+    );
+  }
 
-  /** Makes the player match the shared state; its own events meanwhile are not actions. */
-  function syncPlayer() {
+  /**
+   * Makes the player match the shared state; its own events meanwhile are not actions. `remote`: the
+   * state changed (or a player became ready), which marks the sync echo, allows one local resync and
+   * checks once when the guard ends. `resync`: a local correction (buffering made the player fall
+   * behind), which sends nothing and checks nothing more.
+   */
+  function syncPlayer(origin: 'remote' | 'resync') {
     const c = player();
     const s = stateRef.current;
     // Blocked: retrying without a click would fail again; "Click to play" catches up.
     if (!c || !s.source || blockedRef.current === sourceKey(s.source)) return;
     const plan = applyPlan(s, { position: c.position(), playing: c.playing() }, Date.now());
     if (plan.seekTo === null && !plan.play && !plan.pause) return;
+    // This seek or play is ours: its late PLAYING (after buffering) is not the person's seek.
+    if (plan.seekTo !== null || plan.play) {
+      if (origin === 'remote') echo.mark();
+      else echo.rearm();
+    }
     guard.begin();
     if (plan.seekTo !== null) c.seek(plan.seekTo);
     if (plan.pause) c.pause();
     if (plan.play) playNow(c);
+    if (origin === 'remote') checkAfterGuard();
+  }
+
+  /** A local correction, at most once per sync: never sent, so it cannot pull the other person back. */
+  function resync() {
+    if (echo.takeResync()) syncPlayer('resync');
   }
 
   function playNow(c: PlayerControl) {
@@ -135,13 +174,15 @@ export default function MediaStage({
   function act(next: { source: MediaSource | null; playing: boolean; position: number }) {
     const s = mediaReducer(stateRef.current, { type: 'local', next: { ...next, sentAt: Date.now(), by: role } });
     commit(s);
+    // The person acted: no pending sync echo or resync applies any more.
+    echo.clear();
     const msg = stateMessage(s, s.position, s.sentAt);
-    if (msg) void send(msg).catch(() => {});
+    if (msg) void sendRef.current?.(msg).catch(() => {});
   }
 
   function load(source: MediaSource) {
     block(null);
-    void send({ t: 'media-load', source, at: Date.now() }).catch(() => {});
+    void sendRef.current?.({ t: 'media-load', source, at: Date.now() }).catch(() => {});
     act({ source, playing: false, position: 0 });
   }
 
@@ -154,56 +195,58 @@ export default function MediaStage({
 
   useImperativeHandle(handleRef, () => ({ openAudio }));
 
-  const onControl = (forKey: string) => (c: PlayerControl | null) => {
+  const onControl = (forKey: string, c: PlayerControl | null) => {
     if (c) {
       control.current = { key: forKey, c };
-      syncPlayer();
+      syncPlayer('remote');
     } else if (control.current?.key === forKey) {
       control.current = null;
     }
   };
 
-  /** A check queued for when the echo guard ends. */
-  const recheck = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  /** When the guard ends, an action swallowed inside it (a play right after a remote pause) is caught. */
-  function checkAfterGuard() {
-    if (recheck.current) return;
-    const left = guard.remaining();
-    recheck.current = setTimeout(
-      () => {
-        recheck.current = null;
-        if (guard.active()) return checkAfterGuard();
-        const c = player();
-        const s = stateRef.current;
-        if (!c || !s.source) return;
-        const missed = missedAction(s, { playing: c.playing(), position: c.position() }, Date.now(), blockedRef.current === sourceKey(s.source));
-        if (missed) act({ source: s.source, ...missed });
-      },
-      // While a play is pending, look again shortly; otherwise just after the window.
-      left === Infinity ? 250 : left + 20,
-    );
-  }
   useEffect(() => () => clearTimeout(recheck.current ?? undefined), []);
 
-  const onObserved = (o: Observed) => {
+  const onObserved = (o: Observed, via: ObservedVia) => {
     const s = stateRef.current;
     if (blockedRef.current === sourceKey(s.source)) return;
     if (guard.active()) return checkAfterGuard();
-    if (!isLocalChange(s, o, Date.now())) return;
-    act({ source: s.source, playing: o.playing, position: o.position });
+    const verdict = classifyObserved(s, o, via, Date.now(), echo.pending());
+    if (verdict === 'action') act({ source: s.source, playing: o.playing, position: o.position });
+    else if (verdict === 'resync') resync();
   };
 
-  /** Playback really started: a stale "blocked" mark (a slow buffer, not autoplay) goes, and the player catches up. */
+  /**
+   * Playback really started (after `onObserved` saw the same PLAYING): it settles the sync echo, and a
+   * stale "blocked" mark (a slow buffer, not autoplay) goes while the player catches up locally.
+   */
   const onPlaying = () => {
     const k = sourceKey(stateRef.current.source);
-    if (k === null || blockedRef.current !== k) return;
-    block(null);
-    syncPlayer();
+    if (k !== null && blockedRef.current === k) {
+      block(null);
+      resync();
+    }
+    echo.settle();
   };
 
+  // Received messages: a reply or an answer goes to its sender only; a changed state is applied.
+  const { send } = useMediaChannel((msg: MediaMessage, from: string) => {
+    const prev = stateRef.current;
+    const r = routeMessage(prev, msg, from, { self: role, position: livePosition(), now: Date.now() });
+    // A media-req answer, or my state for someone whose state is stale.
+    if (r.reply) void sendRef.current?.(r.reply.msg, { to: r.reply.to }).catch(() => {});
+    if (r.next === prev) return;
+    commit(r.next);
+    if (!r.next.playing) block(null);
+    // A new media mounts a new player, which syncs when ready.
+    if (r.syncPlayer) syncPlayer('remote');
+  });
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
   // Late join, reload and reconnect: ask for the current media on mount, once connected, after a
-  // reconnect (messages may have been lost meanwhile), and when the other person joins (the first request may have gone out before anyone could answer).
+  // reconnect (messages may have been lost meanwhile), and when the other person joins (the first
+  // request may have gone out before anyone could answer).
   useEffect(() => {
     const ask = () => void send({ t: 'media-req' }).catch(() => {});
     ask();
@@ -271,10 +314,12 @@ export default function MediaStage({
     const s = stateRef.current;
     if (!c) return;
     // Inside the click, so the browser allows it; from where the other person is now.
+    echo.mark();
     guard.begin();
     c.seek(targetPosition(s, Date.now()));
     block(null);
     playNow(c);
+    checkAfterGuard();
   };
 
   const close = () => {
@@ -345,7 +390,7 @@ export default function MediaStage({
                 <YouTubePlayer
                   key={key}
                   videoId={source.videoId}
-                  onControl={onControl(key!)}
+                  onControl={(c) => onControl(key!, c)}
                   onObserved={onObserved}
                   onPlaying={onPlaying}
                   onError={onError}
@@ -355,7 +400,7 @@ export default function MediaStage({
               <AudioPlayer
                 key={key}
                 source={source}
-                onControl={onControl(key!)}
+                onControl={(c) => onControl(key!, c)}
                 onObserved={onObserved}
                 onPlaying={onPlaying}
                 onError={onError}

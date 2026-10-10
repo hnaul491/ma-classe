@@ -187,11 +187,69 @@ export function sourceKey(src: MediaSource | null): string | null {
   return src.kind === 'youtube' ? `yt:${src.videoId}` : `audio:${src.driveId}`;
 }
 
+/** A sync seek or play whose PLAYING has not come yet is forgotten after this. */
+export const SYNC_ECHO_TTL_MS = 10_000;
+
 /**
- * When the echo guard ends: the player's real state, if it differs from the synced one (an action the
- * person took inside the window, swallowed with the echoes), else null. Never for a blocked player.
+ * "The last seek (or play) was ours, not the person's." Set by every correction that comes from the
+ * shared state (`mark`); its late PLAYING, after buffering, then reads as an echo, not a user seek.
+ * `settle()` on that PLAYING; `clear()` on a local action. Each mark allows one local resync, and the
+ * resync only re-arms the echo (`rearm`), so a slow buffer can never loop into corrective seeks.
  */
-export function missedAction(state: MediaState, actual: Observed, now: number, blocked: boolean): Observed | null {
+export function createSyncEcho(now: () => number = Date.now) {
+  let at: number | null = null;
+  let budget = 0;
+  return {
+    mark(): void {
+      at = now();
+      budget = 1;
+    },
+    rearm(): void {
+      at = now();
+    },
+    settle(): void {
+      at = null;
+    },
+    clear(): void {
+      at = null;
+      budget = 0;
+    },
+    pending: (): boolean => at !== null && now() - at < SYNC_ECHO_TTL_MS,
+    takeResync(): boolean {
+      if (budget <= 0) return false;
+      budget -= 1;
+      return true;
+    },
+  };
+}
+
+/** `state`: a play or pause (YouTube state change, audio play/pause); `seek`: a detected seek (time jump, audio seeked). */
+export type ObservedVia = 'state' | 'seek';
+
+/**
+ * A player event outside the echo guard. A play/pause flip is the person's action. A position away
+ * from the target is their seek, except on a state change that follows a sync seek or play (the late
+ * PLAYING after buffering): that only resyncs this player, sending nothing.
+ */
+export function classifyObserved(state: MediaState, o: Observed, via: ObservedVia, now: number, syncPending: boolean): 'action' | 'resync' | 'ignore' {
+  if (!isLocalChange(state, o, now)) return 'ignore';
+  if (o.playing !== state.playing) return 'action';
+  return via === 'state' && syncPending ? 'resync' : 'action';
+}
+
+/**
+ * When the echo guard ends, after a swallowed event. Only a play/pause that differs from the synced
+ * state is the person's action (taken inside the window). A position that differs is most often the
+ * buffering time of our own seek or play (the target moved on meanwhile): resync locally, send
+ * nothing. A real seek inside the window may be lost; that is the accepted trade-off. Nothing for a
+ * blocked player.
+ */
+export function missedAction(
+  state: MediaState,
+  actual: Observed,
+  now: number,
+  blocked: boolean,
+): { kind: 'action'; observed: Observed } | { kind: 'resync' } | null {
   if (blocked || !isLocalChange(state, actual, now)) return null;
-  return actual;
+  return actual.playing !== state.playing ? { kind: 'action', observed: actual } : { kind: 'resync' };
 }

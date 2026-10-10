@@ -14,7 +14,9 @@ export const INITIAL_MEDIA_STATE: MediaState = { source: null, playing: false, p
 /**
  * Where playback should be now (seconds): the sent position plus the time since it was sent while
  * playing. A receiver clock behind the sender's (a `sentAt` in the future) counts as no time at all:
- * the reported position is a floor, so skew never pulls a player back towards 0.
+ * the reported position is a floor, so skew never pulls a player back towards 0. The cost: such a
+ * receiver loses the projection between heartbeats (its target stays at the reported position until
+ * its clock passes `sentAt`), so it corrects less, never wrongly.
  */
 export function targetPosition(s: { playing: boolean; position: number; sentAt: number }, now: number): number {
   const elapsed = Math.max(0, now - s.sentAt);
