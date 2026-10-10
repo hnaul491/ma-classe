@@ -2,19 +2,19 @@
 
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent, type RemoteParticipant } from 'livekit-client';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useEffectEvent } from 'react';
 import { decode, encode, SYNC_TOPIC, type SyncMessage } from './protocol';
 
 export function useSync(onMessage: (msg: SyncMessage, fromIdentity: string) => void) {
   const room = useRoomContext();
-  const handlerRef = useRef(onMessage);
-  handlerRef.current = onMessage;
+  // Always calls the latest onMessage without re-subscribing to the room.
+  const handle = useEffectEvent(onMessage);
 
   useEffect(() => {
     const onData = (payload: Uint8Array, participant?: RemoteParticipant, _kind?: unknown, topic?: string) => {
       if (topic !== SYNC_TOPIC || !participant) return;
       const msg = decode(payload);
-      if (msg) handlerRef.current(msg, participant.identity);
+      if (msg) handle(msg, participant.identity);
     };
     room.on(RoomEvent.DataReceived, onData);
     return () => {

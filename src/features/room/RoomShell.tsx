@@ -25,7 +25,7 @@ import {
   stageAfterLocalShareEnded,
   type StageState,
 } from './stage';
-import { StatusBar } from './StatusBar';
+import { StatusBar, useReconnectingSince } from './StatusBar';
 import { useAutoHide } from './useAutoHide';
 import { useFullscreen } from './useFullscreen';
 import { useToast } from './useToast';
@@ -47,8 +47,9 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
   const [stage, setStage] = useState<StageState>(initialStage);
   const stageRef = useRef(stage);
   const { message: toastMessage, show: showToast } = useToast();
-  const fs = useFullscreen<HTMLDivElement>();
-  const bar = useAutoHide(fs.active);
+  const { ref: fsRef, active: fsActive, toggle: toggleFs } = useFullscreen<HTMLDivElement>();
+  const { visible: barVisible, poke: pokeBar } = useAutoHide(fsActive);
+  const reconnectingSince = useReconnectingSince();
 
   const applyStage = useCallback((next: StageState) => {
     stageRef.current = next;
@@ -62,7 +63,8 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       const next = applyRemoteStage(prev, msg);
       if (next === prev) return;
       applyStage(next);
-      if (prev.by !== null && next.stage !== prev.stage) {
+      // A late-join hand-off (sync) only catches us up; real changes are announced.
+      if (!msg.sync && next.stage !== prev.stage) {
         showToast(t(msg.by === 'teacher' ? 'room.teacherOpened' : 'room.studentOpened', { stage: t(STAGE_KEY[next.stage]) }));
       }
     },
@@ -84,7 +86,9 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
     const onJoin = (p: Participant) => {
       if (p === room.localParticipant) return;
       const s = stageRef.current;
-      if (s.by) send({ t: 'stage', stage: s.stage, lamport: s.lamport, by: s.by }, { to: [p.identity] }).catch(() => {});
+      if (s.by) {
+        send({ t: 'stage', stage: s.stage, lamport: s.lamport, by: s.by, sync: true }, { to: [p.identity] }).catch(() => {});
+      }
     };
     room.on(RoomEvent.ParticipantConnected, onJoin);
     room.on(RoomEvent.ParticipantActive, onJoin);
@@ -164,8 +168,10 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
 
   return (
     <div className="flex h-dvh flex-col bg-paper text-ink">
-      <StatusBar planBUrl={planBUrl} />
-      <div ref={fs.ref} onMouseMove={bar.poke} data-stage={visible} className="relative flex min-h-0 flex-1 bg-paper">
+      {!fsActive && <StatusBar planBUrl={planBUrl} since={reconnectingSince} />}
+      <div ref={fsRef} onMouseMove={pokeBar} data-stage={visible} className="relative flex min-h-0 flex-1 bg-paper">
+        {/* In fullscreen only this element is shown, so the banner must live inside it. */}
+        {fsActive && <StatusBar planBUrl={planBUrl} since={reconnectingSince} overlay />}
         {visible === 'cameras' ? (
           <CameraTiles variant="stage" />
         ) : (
@@ -173,7 +179,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
             <main className="min-w-0 flex-1">
               <ScreenView onStop={() => localParticipant.setScreenShareEnabled(false).catch(() => {})} />
             </main>
-            {fs.active ? (
+            {fsActive ? (
               <FloatingCams />
             ) : (
               <aside className="w-44 shrink-0 overflow-y-auto border-l border-line bg-surface">
@@ -183,19 +189,19 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
           </>
         )}
 
-        {(!fs.active || bar.visible) && (
+        {(!fsActive || barVisible) && (
           <button
             type="button"
-            onClick={() => void fs.toggle()}
-            title={fs.active ? t('room.exitFullscreenHint') : t('room.fullscreenHint')}
-            aria-label={fs.active ? t('room.exitFullscreen') : t('room.fullscreen')}
-            className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${visible === 'cameras' || fs.active ? 'right-3' : 'right-48'}`}
+            onClick={() => void toggleFs()}
+            title={fsActive ? t('room.exitFullscreenHint') : t('room.fullscreenHint')}
+            aria-label={fsActive ? t('room.exitFullscreen') : t('room.fullscreen')}
+            className={`absolute top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-surface/90 shadow ${visible === 'cameras' || fsActive ? 'right-3' : 'right-48'}`}
           >
-            {fs.active ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+            {fsActive ? <ExitFullscreenIcon /> : <FullscreenIcon />}
           </button>
         )}
 
-        {fs.active && bar.visible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
+        {fsActive && barVisible && <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2">{renderBar(true)}</div>}
 
         {toastMessage && (
           <div role="status" className="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-ink px-4 py-1.5 text-sm text-paper shadow">
@@ -203,7 +209,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
           </div>
         )}
       </div>
-      {!fs.active && renderBar(false)}
+      {!fsActive && renderBar(false)}
       <RoomAudioRenderer />
     </div>
   );

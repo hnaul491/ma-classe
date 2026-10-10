@@ -31,7 +31,7 @@ export function LessonClient({ lessonId, member, planBUrl }: { lessonId: string;
   async function join(choices: JoinChoices) {
     setError(null);
     try {
-      const { token, url } = await withRetry(() => fetchToken(lessonId, t), { attempts: 3, baseDelayMs: 500 });
+      const { token, url } = await withRetry(() => fetchToken(lessonId, t), { attempts: 4, baseDelayMs: 500 });
       setConn({ token, url, choices });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('join.failed'));

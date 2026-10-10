@@ -87,18 +87,16 @@ export function ControlBar({
         <ShareIcon />
       </IconButton>
       {!compact && <span className="flex-1" />}
-      {!compact && (
-        <a
-          href={planBUrl}
-          target="_blank"
-          rel="noopener"
-          title={t('bar.planB')}
-          aria-label={t('bar.planB')}
-          className={`${btn} bg-hl text-hl-ink`}
-        >
-          <PlanBIcon />
-        </a>
-      )}
+      <a
+        href={planBUrl}
+        target="_blank"
+        rel="noopener"
+        title={t('bar.planB')}
+        aria-label={t('bar.planB')}
+        className={`${btn} bg-hl text-hl-ink`}
+      >
+        <PlanBIcon />
+      </a>
       <button
         type="button"
         title={endLabel}

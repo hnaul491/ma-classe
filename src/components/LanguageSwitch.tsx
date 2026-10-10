@@ -9,13 +9,17 @@ const OPTIONS: { value: Locale; label: string }[] = [
   { value: 'fr', label: 'Français' },
 ];
 
+function saveLocale(next: Locale) {
+  document.cookie = `lang=${next}; path=/; max-age=31536000; samesite=lax`;
+}
+
 export function LanguageSwitch() {
   const router = useRouter();
   const locale = useLocale();
   const t = useT();
 
   function choose(next: Locale) {
-    document.cookie = `lang=${next}; path=/; max-age=31536000; samesite=lax`;
+    saveLocale(next);
     router.refresh();
   }
 
