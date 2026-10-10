@@ -5,6 +5,7 @@ import { RoomAudioRenderer, useLocalParticipant, useRoomContext, useTracks } fro
 import { RoomEvent, Track, type LocalTrackPublication, type Participant, type RemoteTrackPublication } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { endLesson } from '@/app/actions';
+import { isFileDrag } from '@/features/board/files';
 import { CameraTiles } from '@/features/stage/CameraTiles';
 import { ScreenView } from '@/features/stage/ScreenView';
 import { useT } from '@/lib/i18n/client';
@@ -162,6 +163,20 @@ export function RoomShell({
     }
     await room.disconnect();
   }, [lessonId, room, showToast, t]);
+
+  // A file dropped anywhere outside the board must not make the browser open it (and leave the lesson).
+  // The board's own capture-phase handlers take drops on the board before they get here.
+  useEffect(() => {
+    const guard = (e: DragEvent) => {
+      if (isFileDrag(e.dataTransfer?.types)) e.preventDefault();
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
 
   // A camera or mic that stops working mid-lesson.
   useEffect(() => {

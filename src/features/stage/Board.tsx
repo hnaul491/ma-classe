@@ -5,13 +5,13 @@ import { CaptureUpdateAction, convertToExcalidrawElements, Excalidraw, reconcile
 import type { RemoteExcalidrawElement } from '@excalidraw/excalidraw/data/reconcile';
 import type { ClipboardData } from '@excalidraw/excalidraw/clipboard';
 import type { ExcalidrawElement, FileId, OrderedExcalidrawElement } from '@excalidraw/excalidraw/element/types';
-import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
+import type { AppState, BinaryFileData, Collaborator, ExcalidrawImperativeAPI, ExcalidrawProps, NormalizedZoomValue, SocketId } from '@excalidraw/excalidraw/types';
 import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent, type RemoteParticipant } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useId, useReducer, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
 import { parseBackup, shouldWriteBackup } from '@/features/board/backup';
-import { droppedFile, hasUnstoredImages, sceneFileIds } from '@/features/board/files';
+import { droppedFile, hasUnstoredImages, isFileDrag, sceneFileIds } from '@/features/board/files';
 import { backupKey, loadBoard, loadDocumentFiles, loadFiles, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
@@ -36,6 +36,13 @@ const POINTER_EVERY_MS = 50;
 /** Space above the first inserted page, and between page images (as in layoutPages: 80 px, frames add 20 each side). */
 const FIRST_PAGE_GAP = 160;
 const NEXT_PAGE_GAP = 60;
+
+/** Module-level so Excalidraw's memo sees the same object every render. */
+const UI_OPTIONS = {
+  canvasActions: { loadScene: false, saveToActiveFile: false, export: false, toggleTheme: false, changeViewBackgroundColor: false },
+  // Its images get SHA-1 ids and stay in this browser; ours are uploaded (Add menu, paste, drop).
+  tools: { image: false },
+} satisfies ExcalidrawProps['UIOptions'];
 
 type PointerMessage = Extract<BoardMessage, { t: 'pointer' }>;
 type SaveQueue = ReturnType<typeof createSaveQueue>;
@@ -140,6 +147,14 @@ export default function Board({
 
   // Latest onError without re-running effects when the parent passes a new function.
   const reportError = useEffectEvent((key: MessageKey) => onError(key));
+  // The same for callbacks handed to Excalidraw, which must stay stable (it re-renders on any new prop).
+  const onErrorRef = useRef(onError);
+  const visibleRef = useRef(visible);
+  useEffect(() => {
+    onErrorRef.current = onError;
+    visibleRef.current = visible;
+  });
+  const [menuOpen, setMenuOpen] = useState(false);
 
   /** Image downloads in flight, so a `file` message and a missing-file lookup never fetch one twice. */
   const downloads = useRef(new Map<string, Promise<void>>());
@@ -565,6 +580,7 @@ export default function Board({
   /** Places an already uploaded document again (from the Documents library): same layout, no upload. */
   async function placeExisting(rows: FileRow[]) {
     if (!api) return;
+    setMenuOpen(false);
     if (rows.length === 0) throw new Error('The document has no pages');
     const start = placementStart(api);
     for (let i = 0; i < rows.length; i += 1) {
@@ -585,6 +601,7 @@ export default function Board({
   }
 
   async function onFile(file: File) {
+    setMenuOpen(false);
     const check = checkUpload(file);
     if (!check.ok) return onError(check.reason);
     try {
@@ -607,12 +624,14 @@ export default function Board({
   // Excalidraw's own image tool is off (UIOptions.tools.image), and in 0.18.1 it handles a pasted image
   // file before calling onPaste, so files are caught here, in the capture phase, before it sees them.
   const onIncomingFile = useEffectEvent((file: File) => {
-    if (progress === null) void onFile(file);
+    // Still consumed while busy (the browser would open a dropped file), but say why nothing happened.
+    if (progress !== null) onError('board.busy');
+    else void onFile(file);
   });
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    const hasFiles = (e: DragEvent) => isFileDrag(e.dataTransfer?.types);
     const onDragOver = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       e.preventDefault();
@@ -627,7 +646,8 @@ export default function Board({
       if (file) onIncomingFile(file);
     };
     const onPasteCapture = (e: ClipboardEvent) => {
-      // Same target rule as Excalidraw: the board has focus and no text field is being edited.
+      // Same target rule as Excalidraw: the board is on stage, has focus, and no text field is being edited.
+      if (!visibleRef.current) return;
       const active = document.activeElement;
       if (!root.contains(active) || isTypingElement(active as HTMLElement | null)) return;
       const file = droppedFile(e.clipboardData?.files);
@@ -650,12 +670,12 @@ export default function Board({
   const onPaste = useCallback(
     (data: ClipboardData) => {
       if (data.elements && hasUnstoredImages(data.elements)) {
-        onError('board.pasteImages');
+        onErrorRef.current('board.pasteImages');
         return false;
       }
       return true;
     },
-    [onError],
+    [],
   );
 
   const sortedFrames = [...frames].sort((a, b) => a.y - b.y);
@@ -671,11 +691,7 @@ export default function Board({
         isCollaborating
         theme={theme}
         langCode={locale === 'fr' ? 'fr-FR' : 'en'}
-        UIOptions={{
-          canvasActions: { loadScene: false, saveToActiveFile: false, export: false, toggleTheme: false, changeViewBackgroundColor: false },
-          // Its images get SHA-1 ids and stay in this browser; ours are uploaded (Add menu, paste, drop).
-          tools: { image: false },
-        }}
+        UIOptions={UI_OPTIONS}
       />
 
       <div className="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-end justify-between gap-2">
@@ -685,6 +701,8 @@ export default function Board({
         <div className="pointer-events-auto flex items-center gap-2">
           {progress && <span role="status" className="card px-3 py-1.5 text-sm">{progress}</span>}
           <AddMenu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
             buttonRef={addButton}
             disabled={progress !== null}
             onUpload={() => fileInput.current?.click()}
@@ -745,18 +763,22 @@ export default function Board({
 
 /** The board's Add button: a small menu with Upload and From my documents. */
 function AddMenu({
+  open,
+  onOpenChange: setOpen,
   buttonRef,
   disabled,
   onUpload,
   onDocuments,
 }: {
+  /** Owned by the Board, which closes the menu when an add starts (also by paste or drop). */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   buttonRef: RefObject<HTMLButtonElement | null>;
   disabled: boolean;
   onUpload: () => void;
   onDocuments: () => void;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const shown = open && !disabled;
@@ -770,7 +792,7 @@ function AddMenu({
     };
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [shown, buttonRef]);
+  }, [shown, buttonRef, setOpen]);
 
   function choose(action: () => void) {
     setOpen(false);
@@ -808,7 +830,7 @@ function AddMenu({
         // aria-disabled, not disabled: the button keeps focus while a document is being added.
         aria-disabled={disabled || undefined}
         onClick={() => {
-          if (!disabled) setOpen((o) => !o);
+          if (!disabled) setOpen(!open);
         }}
       >
         {t('board.add')}

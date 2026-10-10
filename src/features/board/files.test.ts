@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { droppedFile, hasUnstoredImages, sceneFileIds } from './files';
+import { droppedFile, hasUnstoredImages, isFileDrag, sceneFileIds } from './files';
 
 const U1 = '3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b';
 const U2 = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -57,5 +57,15 @@ describe('hasUnstoredImages', () => {
   it('is false for our own images and for elements without images', () => {
     expect(hasUnstoredImages([{ type: 'image', fileId: U1 }, { type: 'text' }])).toBe(false);
     expect(hasUnstoredImages([])).toBe(false);
+  });
+});
+
+describe('isFileDrag', () => {
+  it('is true only when the drag carries files', () => {
+    expect(isFileDrag(['Files'])).toBe(true);
+    expect(isFileDrag(['text/plain', 'Files'])).toBe(true);
+    expect(isFileDrag(['text/plain', 'text/uri-list'])).toBe(false);
+    expect(isFileDrag([])).toBe(false);
+    expect(isFileDrag(undefined)).toBe(false);
   });
 });

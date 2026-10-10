@@ -24,3 +24,8 @@ export function hasUnstoredImages(elements: readonly object[]): boolean {
 export function droppedFile<F>(files: ArrayLike<F> | null | undefined): F | null {
   return files && files.length > 0 ? files[0] : null;
 }
+
+/** A drag that carries files (from the computer), as opposed to text or links. */
+export function isFileDrag(types: readonly string[] | null | undefined): boolean {
+  return types?.includes('Files') ?? false;
+}
