@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { estimateUsage, monthStart } from '@/features/usage/estimate';
+import { UsageMeter } from '@/features/usage/UsageMeter';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Wordmark } from '@/components/Wordmark';
@@ -37,6 +39,21 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const lessons = (data ?? []) as Lesson[];
   const live = lessons.find((l) => l.status === 'live') ?? null;
   const past = lessons.filter((l) => l.status === 'ended');
+
+  // The meter is secondary: a failed load shows a note instead of breaking the page.
+  const since = monthStart(new Date()).toISOString();
+  const [usageLessons, usageFiles] = await Promise.all([
+    supabase.from('lessons').select('started_at, ended_at').or(`ended_at.is.null,ended_at.gte.${since}`),
+    supabase.from('files').select('size_bytes'),
+  ]);
+  const usage =
+    usageLessons.error || usageFiles.error
+      ? null
+      : estimateUsage({
+          lessons: usageLessons.data ?? [],
+          fileBytes: (usageFiles.data ?? []).map((f) => Number(f.size_bytes)),
+          now: new Date(),
+        });
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-10 px-4 py-10">
@@ -116,6 +133,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           </ul>
         )}
       </section>
+
+      <UsageMeter usage={usage} t={t} locale={locale} />
     </main>
   );
 }

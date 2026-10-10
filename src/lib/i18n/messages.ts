@@ -206,6 +206,14 @@ export const en = {
   'review.boardFailed': 'The board couldn’t load. Reload the page to try again.',
   'review.noChat': 'No messages in this lesson.',
   'review.noVocab': 'No words were added in this lesson.',
+  'usage.title': 'This month’s free usage',
+  'usage.note': 'Estimated from lesson times. The free plans reset each month.',
+  'usage.minutes': 'Video minutes',
+  'usage.data': 'Video data',
+  'usage.storage': 'File storage',
+  'usage.warn': 'Over 70%: keep an eye on it',
+  'usage.over': 'Free limit reached',
+  'usage.unavailable': 'Usage couldn’t load. It will show again on the next visit.',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -416,6 +424,14 @@ export const fr: Record<MessageKey, string> = {
   'review.boardFailed': 'Le tableau n’a pas pu se charger. Rechargez la page pour réessayer.',
   'review.noChat': 'Aucun message pendant ce cours.',
   'review.noVocab': 'Aucun mot n’a été ajouté pendant ce cours.',
+  'usage.title': 'Utilisation gratuite ce mois-ci',
+  'usage.note': 'Estimation d’après la durée des cours. Les offres gratuites repartent à zéro chaque mois.',
+  'usage.minutes': 'Minutes de vidéo',
+  'usage.data': 'Données vidéo',
+  'usage.storage': 'Stockage des fichiers',
+  'usage.warn': 'Plus de 70 % : à surveiller',
+  'usage.over': 'Limite gratuite atteinte',
+  'usage.unavailable': 'L’utilisation n’a pas pu se charger. Elle s’affichera à la prochaine visite.',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };
