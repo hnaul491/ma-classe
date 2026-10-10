@@ -4,6 +4,8 @@ import { fromRow, VOCAB_COLUMNS, type VocabDraft, type VocabRow, type VocabWord 
 
 export type VocabErrorKey = 'vocab.notReady' | 'vocab.notAllowed' | 'vocab.saveFailed' | 'vocab.gone';
 export type VocabResult<T> = { ok: true; value: T } | { ok: false; error: VocabErrorKey };
+/** What a word form can be told back: a database problem, or a draft that does not pass the checks. */
+export type DraftError = VocabErrorKey | 'vocab.frenchRequired' | 'vocab.tooLong';
 
 /** A call that has not answered after this long counts as failed. */
 const TIMEOUT_MS = 10_000;
@@ -73,4 +75,26 @@ export function deleteWord(id: string): Promise<VocabResult<null>> {
     if (error) return { ok: false, error: vocabErrorKey(error) };
     return (data ?? []).length > 0 ? { ok: true, value: null } : { ok: false, error: 'vocab.notAllowed' };
   });
+}
+
+/** One word, read again from the database: `null` when it no longer exists. */
+export function loadWord(id: string): Promise<VocabResult<VocabWord | null>> {
+  return run(async () => {
+    const { data, error } = await createBrowserSupabase().from('vocab').select(VOCAB_COLUMNS).eq('id', id).maybeSingle();
+    if (error) return { ok: false, error: vocabErrorKey(error) };
+    return { ok: true, value: data ? fromRow(data as VocabRow) : null };
+  });
+}
+
+export type VocabHintAction = { type: 'delete'; id: string } | { type: 'upsert'; word: VocabWord };
+
+/**
+ * A peer's live message only says "word `id` changed": what to do comes from the database row.
+ * Gone: delete it here. There and in this lesson: show the database copy.
+ * A failed read, or a row of another lesson, changes nothing; the next reload reconciles.
+ */
+export function vocabHintAction(id: string, lessonId: string, r: VocabResult<VocabWord | null>): VocabHintAction | null {
+  if (!r.ok) return null;
+  if (r.value === null) return { type: 'delete', id };
+  return r.value.lessonId === lessonId ? { type: 'upsert', word: r.value } : null;
 }

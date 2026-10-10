@@ -12,7 +12,7 @@ vi.mock('@/lib/supabase/client', () => ({
   },
 }));
 
-import { updateWord, vocabErrorKey } from './api';
+import { loadWord, updateWord, vocabErrorKey, vocabHintAction } from './api';
 
 describe('vocabErrorKey', () => {
   it('a missing table means migration 0007 has not run', () => {
@@ -57,5 +57,67 @@ describe('updateWord', () => {
   it('an error is mapped to its key', async () => {
     db.result = { data: null, error: { code: '42P01' } };
     expect(await updateWord(row.id, draft)).toEqual({ ok: false, error: 'vocab.notReady' });
+  });
+});
+
+describe('loadWord', () => {
+  const row = {
+    id: 'AAAAAAAA-0000-4000-8000-000000000002',
+    lesson_id: 'bbbbbbbb-0000-4000-8000-000000000001',
+    french: 'automne',
+    meaning_vi: 'mùa thu',
+    meaning_en: 'autumn',
+    example: '',
+    created_by: 'teacher@example.com',
+    created_at: '2026-10-01T10:00:00Z',
+    updated_at: '2026-10-01T10:05:00Z',
+  };
+
+  it('returns the row from the database', async () => {
+    db.result = { data: row, error: null };
+    expect(await loadWord(row.id)).toEqual({ ok: true, value: expect.objectContaining({ id: row.id.toLowerCase(), french: 'automne' }) });
+  });
+
+  it('no row means the word is gone', async () => {
+    db.result = { data: null, error: null };
+    expect(await loadWord(row.id)).toEqual({ ok: true, value: null });
+  });
+
+  it('an error is mapped to its key', async () => {
+    db.result = { data: null, error: { code: '42501' } };
+    expect(await loadWord(row.id)).toEqual({ ok: false, error: 'vocab.notAllowed' });
+  });
+});
+
+describe('vocabHintAction', () => {
+  const lessonId = 'bbbbbbbb-0000-4000-8000-000000000001';
+  const id = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const word = {
+    id,
+    lessonId,
+    french: 'automne',
+    meaningVi: 'mùa thu',
+    meaningEn: 'autumn',
+    example: '',
+    createdBy: 'teacher@example.com',
+    createdAt: '2026-10-01T10:00:00Z',
+    updatedAt: '2026-10-01T10:05:00Z',
+  };
+
+  it('the row is gone from the database: delete it here', () => {
+    expect(vocabHintAction(id, lessonId, { ok: true, value: null })).toEqual({ type: 'delete', id });
+  });
+
+  it('the row exists: show the database copy', () => {
+    expect(vocabHintAction(id, lessonId, { ok: true, value: word })).toEqual({ type: 'upsert', word });
+  });
+
+  it('a failed read is ignored: the next reload reconciles', () => {
+    expect(vocabHintAction(id, lessonId, { ok: false, error: 'vocab.saveFailed' })).toBeNull();
+  });
+
+  it('a row of another lesson, or of none, is not shown in this one', () => {
+    expect(vocabHintAction(id, lessonId, { ok: true, value: { ...word, lessonId: 'cccccccc-0000-4000-8000-000000000001' } })).toBeNull();
+    expect(vocabHintAction(id, lessonId, { ok: true, value: { ...word, lessonId: null } })).toBeNull();
   });
 });

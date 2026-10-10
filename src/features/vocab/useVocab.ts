@@ -4,15 +4,28 @@ import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useReducer, useState } from 'react';
 import type { Member } from '@/lib/lessons/types';
-import { deleteWord, insertWord, loadLessonWords, updateWord, type VocabErrorKey } from './api';
+import {
+  deleteWord,
+  insertWord,
+  loadLessonWords,
+  loadWord,
+  updateWord,
+  vocabHintAction,
+  type DraftError,
+  type VocabErrorKey,
+  type VocabResult,
+} from './api';
 import { decodeVocab, encodeVocab, initialVocab, prepareWord, VOCAB_TOPIC, vocabReducer, type VocabDraft, type VocabWord } from './model';
 
-type DraftError = VocabErrorKey | 'vocab.frenchRequired' | 'vocab.tooLong';
 export type VocabStatus = 'loading' | 'ready' | VocabErrorKey;
+
+/** A live message carries one word: anything bigger is not ours and is dropped unread. */
+const MAX_HINT_BYTES = 8 * 1024;
 
 /**
  * The lesson's words: database first, then the saved row goes to the other person over LiveKit.
- * `onIncoming`: called for each word the other person adds or edits live (not for reloads).
+ * What the other person sends is only a hint that a word changed: the row is read again from the database.
+ * `onIncoming`: called with the database row for each word the other person adds or edits live (not for reloads).
  */
 export function useVocab(lessonId: string, member: Member, onIncoming?: (w: VocabWord) => void) {
   const room = useRoomContext();
@@ -44,19 +57,25 @@ export function useVocab(lessonId: string, member: Member, onIncoming?: (w: Voca
     };
   }, [room, lessonId]);
 
-  const receive = useEffectEvent((text: string) => {
+  /** The id a peer's message is about, or null when it is malformed or for another lesson. */
+  const hintedId = useEffectEvent((text: string): string | null => {
     const m = decodeVocab(text, lessonId);
-    if (!m) return;
-    if (m.op === 'delete') dispatch({ type: 'delete', id: m.id });
-    else {
-      dispatch({ type: 'upsert', word: m.word });
-      onIncoming?.(m.word);
-    }
+    if (!m) return null;
+    return m.op === 'delete' ? m.id : m.word.id;
   });
 
-  // Live delivery. The payload is untrusted: decodeVocab checks every field and the lesson.
+  const applyHint = useEffectEvent((id: string, r: VocabResult<VocabWord | null>) => {
+    const action = vocabHintAction(id, lessonId, r);
+    if (!action) return;
+    dispatch(action);
+    if (action.type === 'upsert') onIncoming?.(action.word);
+  });
+
+  // Live delivery. The payload is untrusted: only the id is used, the word itself comes from the database.
   useEffect(() => {
     room.registerTextStreamHandler(VOCAB_TOPIC, async (reader) => {
+      const size = reader.info.size;
+      if (size !== undefined && size > MAX_HINT_BYTES) return;
       let text: string;
       try {
         text = await reader.readAll();
@@ -64,7 +83,9 @@ export function useVocab(lessonId: string, member: Member, onIncoming?: (w: Voca
         // A broken stream is dropped; the next reload brings the row from the database.
         return;
       }
-      receive(text);
+      const id = hintedId(text);
+      if (!id) return;
+      applyHint(id, await loadWord(id));
     });
     return () => room.unregisterTextStreamHandler(VOCAB_TOPIC);
   }, [room]);
