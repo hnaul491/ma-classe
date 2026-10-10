@@ -182,10 +182,42 @@ describe('downloadDriveFile', () => {
     await expect(downloadDriveFile(pdf, fetch)).rejects.toBeInstanceOf(DriveFileTooLarge);
   });
 
-  it('refuses a body over the cap even without Content-Length', async () => {
-    const res = new Response('x');
+  it('without Content-Length, counts the streamed bytes and stops reading once over the cap', async () => {
+    let pulls = 0;
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls > 100) controller.close();
+        else controller.enqueue(new Uint8Array(3));
+      },
+      cancel,
+    });
+    const res = new Response(body);
+    expect(res.headers.get('Content-Length')).toBeNull();
+    const fetch = vi.fn(async () => res);
+    await expect(downloadDriveFile({ id: 'a', name: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch, { maxBytes: 10 })).rejects.toBeInstanceOf(DriveFileTooLarge);
+    expect(cancel).toHaveBeenCalled();
+    expect(pulls).toBeLessThan(10); // stopped after 4 chunks (12 bytes), long before the 100th
+  });
+
+  it('a streamed body within the cap is assembled whole', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2]));
+        controller.enqueue(new Uint8Array([3]));
+        controller.close();
+      },
+    });
+    const fetch = vi.fn(async () => new Response(body, { headers: { 'Content-Type': 'audio/mpeg' } }));
+    const f = await downloadDriveFile({ id: 'a', name: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch, { maxBytes: 3 });
+    expect(new Uint8Array(await f.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    expect(f.type).toBe('audio/mpeg');
+  });
+
+  it('with no body stream (some environments), falls back to blob() and checks its size', async () => {
+    const res = new Response(null);
     vi.spyOn(res, 'blob').mockResolvedValue(new Blob([new Uint8Array(8)]));
-    res.headers.delete('Content-Length');
     const fetch = vi.fn(async () => res);
     await expect(downloadDriveFile({ id: 'a', name: 'a.mp3', mimeType: 'audio/mpeg', sizeBytes: null }, fetch, { maxBytes: 4 })).rejects.toBeInstanceOf(DriveFileTooLarge);
   });

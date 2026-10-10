@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useEffectEvent, useRef } from 'react';
-import { autoplayVerdict, SEEK_POLL_MS, isSeekJump, stallVia, ytObserved, ytSample, YT_BUFFERING, YT_PLAYING, type Observed, type ObservedVia, type PlayerControl, type Sample } from './playback';
+import { autoplayVerdict, createStallTracker, SEEK_POLL_MS, isSeekJump, ytObserved, ytSample, YT_BUFFERING, YT_PLAYING, type Observed, type ObservedVia, type PlayerControl, type Sample } from './playback';
 import { loadYouTube, YOUTUBE_HOST } from './youtubeApi';
 
 /** How often a pending `playVideo()` checks whether it reached PLAYING. */
@@ -46,8 +46,8 @@ export function YouTubePlayer({
     let player: YT.Player | null = null;
     let poll: ReturnType<typeof setInterval> | undefined;
     let prev: Sample | null = null;
-    /** Set at BUFFERING: the last time sample before it, to tell a stall from a seek at the next PLAYING. */
-    let buffering: { before: Sample | null } | null = null;
+    /** Tells a buffering stall from a seek at the PLAYING after BUFFERING. */
+    const stalls = createStallTracker();
     /** Pending `play()` checks, run on every state change (with it) and by a timer; on unmount they settle as played. */
     const pending = new Set<(destroyed?: boolean, eventState?: number) => void>();
 
@@ -72,7 +72,6 @@ export function YouTubePlayer({
       play: () =>
         new Promise<boolean>((resolve) => {
           const started = Date.now();
-          let sawBuffering = false;
           const finish = (ok: boolean) => {
             pending.delete(check);
             clearInterval(timer);
@@ -80,11 +79,9 @@ export function YouTubePlayer({
           };
           const check = (destroyed?: boolean, eventState?: number) => {
             if (destroyed) return finish(true);
-            const now = eventState ?? state();
-            if (now === YT_BUFFERING) sawBuffering = true;
-            const verdict = autoplayVerdict(now, Date.now() - started, { event: eventState !== undefined, sawBuffering });
-            // 'paused': the person paused while it was starting; not blocked (the stage sees the pause).
-            if (verdict !== 'wait') finish(verdict !== 'blocked');
+            // A PAUSED here is blocked too (mobile Safari refuses a play that way): never the person's pause.
+            const verdict = autoplayVerdict(eventState ?? state(), Date.now() - started);
+            if (verdict !== 'wait') finish(verdict === 'playing');
           };
           const timer = setInterval(() => check(), AUTOPLAY_CHECK_MS);
           pending.add(check);
@@ -119,9 +116,7 @@ export function YouTubePlayer({
             onStateChange: (e) => {
               for (const check of [...pending]) check(false, e.data);
               const position = time();
-              if (e.data === YT_BUFFERING) buffering ??= { before: prev };
-              const via = e.data === YT_PLAYING && buffering ? stallVia(buffering.before, position) : 'state';
-              if (e.data !== YT_BUFFERING) buffering = null;
+              const via = stalls.onState(e.data, position, Date.now(), prev);
               const o = ytObserved(e.data, position);
               if (o) observed(o, via);
               // After the event above, so a late autoplay is not mistaken for the person's play.

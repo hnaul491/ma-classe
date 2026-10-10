@@ -91,18 +91,12 @@ export const AUTOPLAY_TIMEOUT_MS = 1500;
 export const AUTOPLAY_MAX_WAIT_MS = 5000;
 
 /**
- * After `playVideo()`: playing, keep waiting, blocked ("Click to play"), or paused by the person. A
- * PAUSED counts as their pause only as an event that follows BUFFERING (the pause button shows only
- * once the player started): the player starts paused, so a PAUSED read by the timer, or one before
- * any buffering, says nothing.
+ * After `playVideo()`: playing, keep waiting, or blocked ("Click to play"). A PAUSED while it is
+ * pending is blocked too, even after BUFFERING: mobile Safari reports a refused play that way, and a
+ * refused play must never pause the other person. (A real pause pressed in that window may be lost.)
  */
-export function autoplayVerdict(
-  playerState: number,
-  elapsedMs: number,
-  ctx: { event?: boolean; sawBuffering?: boolean } = {},
-): 'playing' | 'wait' | 'blocked' | 'paused' {
+export function autoplayVerdict(playerState: number, elapsedMs: number): 'playing' | 'wait' | 'blocked' {
   if (playerState === YT_PLAYING) return 'playing';
-  if (playerState === YT_PAUSED && ctx.event && ctx.sawBuffering) return 'paused';
   const limit = playerState === YT_BUFFERING ? AUTOPLAY_MAX_WAIT_MS : AUTOPLAY_TIMEOUT_MS;
   return elapsedMs >= limit ? 'blocked' : 'wait';
 }
@@ -266,6 +260,30 @@ export function classifyObserved(state: MediaState, o: Observed, via: ObservedVi
  */
 export function stallVia(before: Sample | null, position: number): ObservedVia {
   return before && Math.abs(position - before.position) <= SEEK_JUMP_S ? 'stall' : 'state';
+}
+
+/**
+ * Tells a buffering stall from a seek across YouTube state changes. At the first BUFFERING it keeps
+ * the last time sample (`last`, from the seek poll) projected to that moment when it was playing (the
+ * sample can be 0.5 s old); the next PLAYING is then a `stall` or a `state` change (`stallVia`). Any
+ * other state (PAUSED, ENDED…) ends the buffering spell, so its PLAYING is a plain `state` change.
+ */
+export function createStallTracker() {
+  /** undefined: not buffering; null: buffering with no sample before it (our own seek reset it). */
+  let before: Sample | null | undefined;
+  return {
+    onState(playerState: number, position: number, now: number, last: Sample | null): ObservedVia {
+      if (playerState === YT_BUFFERING) {
+        if (before === undefined) {
+          before = last && { at: now, position: last.position + (last.playing ? Math.max(0, now - last.at) / 1000 : 0), playing: last.playing };
+        }
+        return 'state';
+      }
+      const via = playerState === YT_PLAYING && before !== undefined ? stallVia(before, position) : 'state';
+      before = undefined;
+      return via;
+    },
+  };
 }
 
 /**

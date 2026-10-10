@@ -7,6 +7,7 @@ import {
   classifyObserved,
   createEchoGuard,
   createSyncEcho,
+  createStallTracker,
   stallVia,
   stampArrival,
   SYNC_ECHO_TTL_MS,
@@ -201,16 +202,14 @@ describe('autoplayVerdict', () => {
     expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_MAX_WAIT_MS)).toBe('blocked');
   });
 
-  it('a PAUSED event after the player started buffering is the person’s pause, not blocked autoplay', () => {
-    expect(autoplayVerdict(YT_PAUSED, 600, { event: true, sawBuffering: true })).toBe('paused');
-    expect(autoplayVerdict(YT_PAUSED, AUTOPLAY_TIMEOUT_MS, { event: true, sawBuffering: true })).toBe('paused');
-  });
-
-  it('PAUSED read by the timer, or a PAUSED event before any buffering, is not a pause (the player starts paused)', () => {
-    expect(autoplayVerdict(YT_PAUSED, 600)).toBe('wait');
-    expect(autoplayVerdict(YT_PAUSED, 600, { event: false, sawBuffering: true })).toBe('wait');
-    expect(autoplayVerdict(YT_PAUSED, 600, { event: true, sawBuffering: false })).toBe('wait');
-    expect(autoplayVerdict(YT_PAUSED, AUTOPLAY_TIMEOUT_MS, { event: true, sawBuffering: false })).toBe('blocked');
+  it('a PAUSED while a play is pending (even after BUFFERING, as mobile Safari refuses it) is blocked, never a pause', () => {
+    // Only three outcomes: a refused play never reads as the person’s pause, so it is never broadcast.
+    const outcomes = new Set<string>();
+    for (const elapsed of [0, 600, AUTOPLAY_TIMEOUT_MS - 1, AUTOPLAY_TIMEOUT_MS, AUTOPLAY_MAX_WAIT_MS]) outcomes.add(autoplayVerdict(YT_PAUSED, elapsed));
+    expect([...outcomes].sort()).toEqual(['blocked', 'wait']);
+    expect(autoplayVerdict(YT_PAUSED, AUTOPLAY_TIMEOUT_MS)).toBe('blocked');
+    // A blocked player has no missed action at guard end: its PAUSED is not sent.
+    expect(missedAction(playing, { playing: false, position: 10 }, 1500, true)).toBeNull();
   });
 });
 
@@ -472,5 +471,58 @@ describe('stampArrival', () => {
     const s: MediaState = { source: yt, playing: true, position: 10, sentAt: 1000, lamport: 3, by: 'student' };
     const beat = stampArrival({ t: 'media-state', source: yt, playing: true, position: 15, sentAt: 1, lamport: 3, by: 'student' }, 6000);
     expect(routeMessage(s, beat, 'student@x', { self: 'teacher', position: null, now: 6000 }).next.position).toBe(15);
+  });
+});
+
+describe('createStallTracker', () => {
+  const sample = (at: number, position: number, playing = true) => ({ at, position, playing });
+
+  it('BUFFERING then PLAYING close to where it was: a stall', () => {
+    const t = createStallTracker();
+    expect(t.onState(YT_BUFFERING, 40.2, 1000, sample(900, 40.1))).toBe('state');
+    expect(t.onState(YT_PLAYING, 40.3, 4000, null)).toBe('stall');
+  });
+
+  it('BUFFERING then PLAYING far from it: the person seeked (state)', () => {
+    const t = createStallTracker();
+    t.onState(YT_BUFFERING, 80, 1000, sample(900, 40.1));
+    expect(t.onState(YT_PLAYING, 80, 2000, null)).toBe('state');
+  });
+
+  it('BUFFERING, PAUSED, then PLAYING: a play from pause, not a stall', () => {
+    const t = createStallTracker();
+    t.onState(YT_BUFFERING, 40, 1000, sample(900, 40));
+    expect(t.onState(YT_PAUSED, 40, 1500, null)).toBe('state');
+    expect(t.onState(YT_PLAYING, 40, 3000, null)).toBe('state');
+  });
+
+  it('projects a playing sample to the BUFFERING moment (a sample up to 0.5 s old)', () => {
+    // Sampled at 40 s, 500 ms before the stall: it was really at 40.5 s when it stalled.
+    const t = createStallTracker();
+    t.onState(YT_BUFFERING, 40.5, 1000, sample(500, 40));
+    expect(t.onState(YT_PLAYING, 41.4, 5000, null)).toBe('stall'); // 0.9 s from 40.5, but 1.4 s from 40
+    const back = createStallTracker();
+    back.onState(YT_BUFFERING, 40.5, 1000, sample(500, 40));
+    expect(back.onState(YT_PLAYING, 39.4, 5000, null)).toBe('state'); // 1.1 s back from 40.5
+  });
+
+  it('does not project a paused sample', () => {
+    const t = createStallTracker();
+    t.onState(YT_BUFFERING, 40, 1000, sample(500, 40, false));
+    expect(t.onState(YT_PLAYING, 41.4, 5000, null)).toBe('state');
+  });
+
+  it('keeps the first snapshot over repeated BUFFERING, and nothing before it (our own seek reset it) is a state', () => {
+    const t = createStallTracker();
+    t.onState(YT_BUFFERING, 40, 1000, sample(1000, 40));
+    t.onState(YT_BUFFERING, 40, 1300, sample(1300, 70));
+    expect(t.onState(YT_PLAYING, 40.4, 3000, null)).toBe('stall');
+    const none = createStallTracker();
+    none.onState(YT_BUFFERING, 40, 1000, null);
+    expect(none.onState(YT_PLAYING, 40, 3000, null)).toBe('state');
+  });
+
+  it('a PLAYING with no buffering before it is a state change', () => {
+    expect(createStallTracker().onState(YT_PLAYING, 40, 1000, sample(900, 40))).toBe('state');
   });
 });

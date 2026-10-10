@@ -108,8 +108,8 @@ export async function driveErrorReason(res: Response): Promise<string | null> {
 /**
  * The file's content as a `File`: downloaded as is (PDF, image, audio), or exported to PDF (Docs and
  * Slides, named `<name>.pdf`). Throws DriveExportTooLarge over Drive's export limit, and
- * DriveFileTooLarge over the limit for its kind (audio 50 MB, others 30 MB) before reading the body
- * when Drive sends Content-Length. `signal` aborts the download. Never opens a pop-up (it runs after
+ * DriveFileTooLarge over the limit for its kind (audio 50 MB, others 30 MB): from Content-Length
+ * before reading, otherwise as soon as the streamed bytes pass it. `signal` aborts the download. Never opens a pop-up (it runs after
  * the pick, outside the click): throws DriveReauthRequired instead.
  */
 export async function downloadDriveFile(
@@ -134,11 +134,38 @@ export async function downloadDriveFile(
     void res.body?.cancel().catch(() => {});
     throw new DriveFileTooLarge();
   }
-  const blob = await res.blob();
-  if (blob.size > maxBytes) throw new DriveFileTooLarge();
+  const blob = await readCapped(res, maxBytes);
   if (!exporting) return new File([blob], f.name, { type: f.mimeType });
   const name = /\.pdf$/i.test(f.name) ? f.name : `${f.name}.pdf`;
   return new File([blob], name, { type: 'application/pdf' });
+}
+
+/**
+ * The body as a Blob, counting bytes as they stream: over `maxBytes`, it cancels the stream and throws
+ * DriveFileTooLarge without reading the rest (Drive may send no Content-Length). Without a body
+ * stream (some environments), reads it whole and checks the size.
+ */
+async function readCapped(res: Response, maxBytes: number): Promise<Blob> {
+  const type = res.headers.get('Content-Type') ?? '';
+  if (!res.body) {
+    const blob = await res.blob();
+    if (blob.size > maxBytes) throw new DriveFileTooLarge();
+    return blob;
+  }
+  const reader = res.body.getReader();
+  const chunks: BlobPart[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new DriveFileTooLarge();
+    }
+    chunks.push(value as Uint8Array<ArrayBuffer>);
+  }
+  return new Blob(chunks, { type });
 }
 
 /** A Picker document as a DriveFile (`sizeBytes` comes as a string), or null without an id. */
