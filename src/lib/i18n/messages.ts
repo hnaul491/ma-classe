@@ -96,6 +96,21 @@ export const en = {
   'room.exitFullscreen': 'Exit fullscreen',
   'room.exitFullscreenHint': 'Exit fullscreen (Esc)',
   'board.accents': 'French accents',
+  'board.insert': 'Add a PDF or image',
+  'board.adding': 'Adding page {n} of {total}…',
+  'board.addingImage': 'Adding image…',
+  'board.unsupported': 'Only PDF, PNG, JPG and WebP files can be added.',
+  'board.fileTooLarge': 'This file is over 30 MB. Use a smaller file.',
+  'board.tooManyPages': 'This PDF has more than 50 pages. Split it and add the parts.',
+  'board.uploadFailed': 'The file could not be added. Check your connection and try again.',
+  'board.saveFailed': 'The board is not saved yet. Retrying…',
+  'board.loadFailed': 'The saved board could not be loaded. New drawings are still shared.',
+  'board.pages': 'Pages',
+  'board.page': 'Page {n}',
+  'board.following': 'Following your teacher',
+  'board.resume': 'Resume following',
+  'bar.board': 'Board',
+  'bar.closeBoard': 'Back to cameras',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -196,6 +211,21 @@ export const fr: Record<MessageKey, string> = {
   'room.exitFullscreen': 'Quitter le plein écran',
   'room.exitFullscreenHint': 'Quitter le plein écran (Échap)',
   'board.accents': 'Accents français',
+  'board.insert': 'Ajouter un PDF ou une image',
+  'board.adding': 'Ajout de la page {n} sur {total}…',
+  'board.addingImage': 'Ajout de l’image…',
+  'board.unsupported': 'Seuls les fichiers PDF, PNG, JPG et WebP peuvent être ajoutés.',
+  'board.fileTooLarge': 'Ce fichier dépasse 30 Mo. Utilisez un fichier plus léger.',
+  'board.tooManyPages': 'Ce PDF dépasse 50 pages. Découpez-le et ajoutez les parties.',
+  'board.uploadFailed': 'Le fichier n’a pas pu être ajouté. Vérifiez votre connexion et réessayez.',
+  'board.saveFailed': 'Le tableau n’est pas encore enregistré. Nouvel essai…',
+  'board.loadFailed': 'Le tableau enregistré n’a pas pu être chargé. Les nouveaux dessins restent partagés.',
+  'board.pages': 'Pages',
+  'board.page': 'Page {n}',
+  'board.following': 'Vous suivez votre prof',
+  'board.resume': 'Reprendre le suivi',
+  'bar.board': 'Tableau',
+  'bar.closeBoard': 'Retour aux caméras',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };
