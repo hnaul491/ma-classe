@@ -180,9 +180,9 @@ export default function MediaStage({
     if (msg) void sendRef.current?.(msg).catch(() => {});
   }
 
+  /** Opens a media for both: its state (paused at 0) is the whole message. */
   function load(source: MediaSource) {
     block(null);
-    void sendRef.current?.({ t: 'media-load', source, at: Date.now() }).catch(() => {});
     act({ source, playing: false, position: 0 });
   }
 
@@ -229,6 +229,7 @@ export default function MediaStage({
   };
 
   // Received messages: a reply or an answer goes to its sender only; a changed state is applied.
+  // routeMessage stamps a received state with its arrival time, so only this clock is used.
   const { send } = useMediaChannel((msg: MediaMessage, from: string) => {
     const prev = stateRef.current;
     const r = routeMessage(prev, msg, from, { self: role, position: livePosition(), now: Date.now() });

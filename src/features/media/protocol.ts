@@ -8,14 +8,13 @@ export type MediaSource =
   | { kind: 'audio'; driveId: string; name: string; mimeType: string };
 
 /**
- * - `media-load`: someone opened a media (`at`: send time, ms).
- * - `media-state`: the full playback state after an action, and every 5 s while playing.
- *   `position` is in seconds at `sentAt` (ms, sender clock). `by` is who acted last: the teacher wins
+ * - `media-state`: the full playback state after an action (opening a media included), and every 5 s
+ *   while playing. `position` is in seconds at `sentAt` (ms, sender clock; the receiver re-stamps it
+ *   on arrival, see `stampArrival`). `by` is who acted last: the teacher wins
  *   a Lamport tie, and only that person sends the heartbeat.
  * - `media-req`: a (re)joining person asks for the current state.
  */
 export type MediaMessage =
-  | { t: 'media-load'; source: MediaSource; at: number }
   | { t: 'media-state'; source: MediaSource | null; playing: boolean; position: number; sentAt: number; lamport: number; by: Role }
   | { t: 'media-req' };
 
@@ -24,6 +23,8 @@ const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const DRIVE_ID = /^[A-Za-z0-9_-]{1,200}$/;
 /** Titles and names are shown, not trusted: keep packets small. */
 const MAX_TEXT = 200;
+/** Positions are capped to a day (seconds): no media here is longer. */
+export const MAX_POSITION_S = 86_400;
 
 export function encodeMedia(msg: MediaMessage): string {
   return JSON.stringify({ v: 1, ...msg });
@@ -57,10 +58,6 @@ export function decodeMedia(text: string): MediaMessage | null {
   const m = o as Record<string, unknown>;
   if (m.v !== 1) return null;
   switch (m.t) {
-    case 'media-load': {
-      const source = decodeSource(m.source);
-      return source && finite(m.at) ? { t: 'media-load', source, at: m.at } : null;
-    }
     case 'media-state': {
       const source = m.source === null ? null : decodeSource(m.source);
       if (m.source !== null && source === null) return null;
@@ -68,10 +65,10 @@ export function decodeMedia(text: string): MediaMessage | null {
         finite(m.position) &&
         m.position >= 0 &&
         finite(m.sentAt) &&
-        Number.isInteger(m.lamport) &&
+        Number.isSafeInteger(m.lamport) &&
         (m.lamport as number) >= 0 &&
         (m.by === 'teacher' || m.by === 'student')
-        ? { t: 'media-state', source, playing: m.playing, position: m.position, sentAt: m.sentAt, lamport: m.lamport as number, by: m.by }
+        ? { t: 'media-state', source, playing: m.playing, position: Math.min(m.position, MAX_POSITION_S), sentAt: m.sentAt, lamport: m.lamport as number, by: m.by }
         : null;
     }
     case 'media-req':

@@ -7,6 +7,8 @@ import {
   classifyObserved,
   createEchoGuard,
   createSyncEcho,
+  stallVia,
+  stampArrival,
   SYNC_ECHO_TTL_MS,
   routeMessage,
   ECHO_GUARD_MS,
@@ -198,6 +200,18 @@ describe('autoplayVerdict', () => {
     expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_MAX_WAIT_MS - 1)).toBe('wait');
     expect(autoplayVerdict(YT_BUFFERING, AUTOPLAY_MAX_WAIT_MS)).toBe('blocked');
   });
+
+  it('a PAUSED event after the player started buffering is the person’s pause, not blocked autoplay', () => {
+    expect(autoplayVerdict(YT_PAUSED, 600, { event: true, sawBuffering: true })).toBe('paused');
+    expect(autoplayVerdict(YT_PAUSED, AUTOPLAY_TIMEOUT_MS, { event: true, sawBuffering: true })).toBe('paused');
+  });
+
+  it('PAUSED read by the timer, or a PAUSED event before any buffering, is not a pause (the player starts paused)', () => {
+    expect(autoplayVerdict(YT_PAUSED, 600)).toBe('wait');
+    expect(autoplayVerdict(YT_PAUSED, 600, { event: false, sawBuffering: true })).toBe('wait');
+    expect(autoplayVerdict(YT_PAUSED, 600, { event: true, sawBuffering: false })).toBe('wait');
+    expect(autoplayVerdict(YT_PAUSED, AUTOPLAY_TIMEOUT_MS, { event: true, sawBuffering: false })).toBe('blocked');
+  });
 });
 
 describe('isSeekJump', () => {
@@ -316,8 +330,9 @@ describe('routeMessage', () => {
     expect(r).toEqual({ next: mine, reply: null, syncPlayer: false });
   });
 
-  it('media-load changes nothing (its media-state follows)', () => {
-    expect(routeMessage(mine, { t: 'media-load', source: other, at: 1 }, 'student@x', ctx)).toEqual({ next: mine, reply: null, syncPlayer: false });
+  it('stamps a received state with the arrival time, so the receiver’s clock is the only one used', () => {
+    const r = routeMessage(mine, stateMsg({ lamport: 7, by: 'student', sentAt: 999_999_999 }), 'student@x', ctx);
+    expect(r.next.sentAt).toBe(ctx.now);
   });
 });
 
@@ -366,8 +381,12 @@ describe('classifyObserved (outside the echo guard)', () => {
     expect(classifyObserved(playing, late, 'state', 3500, true)).toBe('resync');
   });
 
-  it('without a sync seek pending, the same PLAYING far from the target is the person’s seek', () => {
-    expect(classifyObserved(playing, late, 'state', 3500, false)).toBe('action');
+  it('a PLAYING after a buffering stall (no jump from before it) only resyncs, even with no sync pending', () => {
+    expect(classifyObserved(playing, late, 'stall', 3500, false)).toBe('resync');
+  });
+
+  it('a PLAYING whose position jumped from before the buffering is the person’s seek', () => {
+    expect(classifyObserved(playing, { playing: true, position: 80 }, 'state', 3500, false)).toBe('action');
   });
 
   it('a detected seek (time jump, audio seeked) is the person’s, even with a sync pending', () => {
@@ -425,5 +444,33 @@ describe('createSyncEcho', () => {
     e.clear();
     expect(e.pending()).toBe(false);
     expect(e.takeResync()).toBe(false);
+  });
+});
+
+describe('stallVia', () => {
+  const before = { at: 0, position: 40, playing: true };
+
+  it('a PLAYING within the seek threshold of the last sample before BUFFERING is a stall', () => {
+    expect(stallVia(before, 40.4)).toBe('stall');
+    expect(stallVia(before, 41)).toBe('stall');
+  });
+
+  it('a jump from that sample is a seek (state), as is a PLAYING with no sample before (our own seek reset it)', () => {
+    expect(stallVia(before, 41.2)).toBe('state');
+    expect(stallVia(before, 10)).toBe('state');
+    expect(stallVia(null, 40)).toBe('state');
+  });
+});
+
+describe('stampArrival', () => {
+  it('replaces sentAt with the local arrival time, keeping everything else', () => {
+    const m = { t: 'media-state' as const, source: yt, playing: true, position: 12, sentAt: 5, lamport: 3, by: 'student' as const };
+    expect(stampArrival(m, 7000)).toEqual({ ...m, sentAt: 7000 });
+  });
+
+  it('heartbeats from the same person stay ordered: a later arrival wins on the reliable, ordered channel', () => {
+    const s: MediaState = { source: yt, playing: true, position: 10, sentAt: 1000, lamport: 3, by: 'student' };
+    const beat = stampArrival({ t: 'media-state', source: yt, playing: true, position: 15, sentAt: 1, lamport: 3, by: 'student' }, 6000);
+    expect(routeMessage(s, beat, 'student@x', { self: 'teacher', position: null, now: 6000 }).next.position).toBe(15);
   });
 });

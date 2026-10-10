@@ -82,8 +82,7 @@ describe('encodeMedia / decodeMedia', () => {
 
   it('round-trips every message', () => {
     const msgs: MediaMessage[] = [
-      { t: 'media-load', source: yt, at: 1_700_000_000_000 },
-      { t: 'media-load', source: audio, at: 1 },
+      { t: 'media-state', source: audio, playing: false, position: 0, sentAt: 1, lamport: 1, by: 'teacher' },
       { t: 'media-state', source: yt, playing: true, position: 12.5, sentAt: 1_700_000_000_000, lamport: 3, by: 'teacher' },
       { t: 'media-state', source: null, playing: false, position: 0, sentAt: 5, lamport: 0, by: 'student' },
       { t: 'media-req' },
@@ -146,9 +145,19 @@ describe('encodeMedia / decodeMedia', () => {
     expect(decodeMedia(state({ by: 'teacher' }))).toMatchObject({ by: 'teacher' });
   });
 
-  it('needs a source and a finite time for media-load', () => {
-    expect(decodeMedia(JSON.stringify({ v: 1, t: 'media-load', source: null, at: 1 }))).toBeNull();
-    expect(decodeMedia(JSON.stringify({ v: 1, t: 'media-load', source: yt }))).toBeNull();
+  it('media-load is no longer a message (nothing read it)', () => {
+    expect(decodeMedia(JSON.stringify({ v: 1, t: 'media-load', source: yt, at: 1 }))).toBeNull();
+  });
+
+  it('needs a safe integer lamport', () => {
+    expect(decodeMedia(state({ lamport: Number.MAX_SAFE_INTEGER }))).not.toBeNull();
+    expect(decodeMedia(state({}).replace('"lamport":1', '"lamport":9007199254740993'))).toBeNull();
+    expect(decodeMedia(state({}).replace('"lamport":1', '"lamport":1e300'))).toBeNull();
+  });
+
+  it('caps the position to a day (86400 s)', () => {
+    expect(decodeMedia(state({ position: 86400 }))).toMatchObject({ position: 86400 });
+    expect(decodeMedia(state({ position: 1e12 }))).toMatchObject({ position: 86400 });
   });
 
   it('keeps only known fields, drops a non-string title and shortens a long one', () => {

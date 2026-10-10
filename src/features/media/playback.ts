@@ -90,9 +90,19 @@ export const AUTOPLAY_TIMEOUT_MS = 1500;
 /** Still buffering (slow connection) gets this long in all. */
 export const AUTOPLAY_MAX_WAIT_MS = 5000;
 
-/** After `playVideo()`: playing, keep waiting, or blocked ("Click to play"). */
-export function autoplayVerdict(playerState: number, elapsedMs: number): 'playing' | 'wait' | 'blocked' {
+/**
+ * After `playVideo()`: playing, keep waiting, blocked ("Click to play"), or paused by the person. A
+ * PAUSED counts as their pause only as an event that follows BUFFERING (the pause button shows only
+ * once the player started): the player starts paused, so a PAUSED read by the timer, or one before
+ * any buffering, says nothing.
+ */
+export function autoplayVerdict(
+  playerState: number,
+  elapsedMs: number,
+  ctx: { event?: boolean; sawBuffering?: boolean } = {},
+): 'playing' | 'wait' | 'blocked' | 'paused' {
   if (playerState === YT_PLAYING) return 'playing';
+  if (playerState === YT_PAUSED && ctx.event && ctx.sawBuffering) return 'paused';
   const limit = playerState === YT_BUFFERING ? AUTOPLAY_MAX_WAIT_MS : AUTOPLAY_TIMEOUT_MS;
   return elapsedMs >= limit ? 'blocked' : 'wait';
 }
@@ -170,15 +180,22 @@ export function routeMessage(
     case 'media-req':
       return { next: state, reply: answer(), syncPlayer: false };
     case 'media-state': {
-      const r = receiveState(state, msg, ctx.self);
+      const r = receiveState(state, stampArrival(msg, ctx.now), ctx.self);
       if (r.next === state) return { next: state, reply: r.answer ? answer() : null, syncPlayer: false };
       const sameMedia = sourceKey(r.next.source) === sourceKey(state.source);
       return { next: r.next, reply: null, syncPlayer: sameMedia };
     }
-    default:
-      // media-load: the media-state that follows carries everything.
-      return { next: state, reply: null, syncPlayer: false };
   }
+}
+
+/**
+ * A received state as of its arrival: `sentAt` becomes the local time, so `targetPosition` only ever
+ * compares times on the receiver's clock (no clock skew between France and Taiwan). The one-way
+ * latency (about 125 ms) is not compensated. Heartbeats from the same person stay ordered: the channel
+ * is reliable and ordered, so a later one arrives later.
+ */
+export function stampArrival(msg: Extract<MediaMessage, { t: 'media-state' }>, now: number): Extract<MediaMessage, { t: 'media-state' }> {
+  return { ...msg, sentAt: now };
 }
 
 /** One key per media, so a new one mounts a new player. */
@@ -223,18 +240,32 @@ export function createSyncEcho(now: () => number = Date.now) {
   };
 }
 
-/** `state`: a play or pause (YouTube state change, audio play/pause); `seek`: a detected seek (time jump, audio seeked). */
-export type ObservedVia = 'state' | 'seek';
+/**
+ * - `state`: a play or pause (YouTube state change, audio play/pause);
+ * - `seek`: a detected seek (time jump, audio seeked);
+ * - `stall`: a YouTube PLAYING after BUFFERING with no jump from before it (see `stallVia`).
+ */
+export type ObservedVia = 'state' | 'seek' | 'stall';
 
 /**
  * A player event outside the echo guard. A play/pause flip is the person's action. A position away
- * from the target is their seek, except on a state change that follows a sync seek or play (the late
- * PLAYING after buffering): that only resyncs this player, sending nothing.
+ * from the target is their seek, except after a buffering stall, or on a state change that follows a
+ * sync seek or play (the late PLAYING after buffering): those only resync this player, sending nothing.
  */
 export function classifyObserved(state: MediaState, o: Observed, via: ObservedVia, now: number, syncPending: boolean): 'action' | 'resync' | 'ignore' {
   if (!isLocalChange(state, o, now)) return 'ignore';
   if (o.playing !== state.playing) return 'action';
+  if (via === 'stall') return 'resync';
   return via === 'state' && syncPending ? 'resync' : 'action';
+}
+
+/**
+ * A YouTube PLAYING after BUFFERING: a `stall` when the time is within the seek threshold of the last
+ * sample before the buffering (playback just paused for data), a `state` change otherwise (the person
+ * seeked, which is what made it buffer). No sample (our own seek reset it): a `state` change.
+ */
+export function stallVia(before: Sample | null, position: number): ObservedVia {
+  return before && Math.abs(position - before.position) <= SEEK_JUMP_S ? 'stall' : 'state';
 }
 
 /**

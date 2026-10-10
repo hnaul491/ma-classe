@@ -11,11 +11,11 @@ describe('targetPosition', () => {
     expect(targetPosition({ playing: false, position: 10, sentAt: 1000 }, 61_000)).toBe(10);
   });
 
-  it('a receiver clock behind the sender never moves the target before the reported position', () => {
+  it('a sentAt in the future (the clock stepped back) never moves the target before the position', () => {
     expect(targetPosition({ playing: true, position: 0.1, sentAt: 2000 }, 1000)).toBe(0.1);
   });
 
-  it('clock skew cannot trap a player near 0: the reported position is a floor', () => {
+  it('a clock step cannot trap a player near 0: the position is a floor', () => {
     // The receiver's clock is 30 s behind: every heartbeat looks like it comes from the future.
     const heartbeat = { playing: true, position: 100, sentAt: 1_000_000 };
     const now = 1_000_000 - 30_000;

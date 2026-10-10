@@ -12,11 +12,10 @@ export type MediaState = { source: MediaSource | null; playing: boolean; positio
 export const INITIAL_MEDIA_STATE: MediaState = { source: null, playing: false, position: 0, sentAt: 0, lamport: 0, by: null };
 
 /**
- * Where playback should be now (seconds): the sent position plus the time since it was sent while
- * playing. A receiver clock behind the sender's (a `sentAt` in the future) counts as no time at all:
- * the reported position is a floor, so skew never pulls a player back towards 0. The cost: such a
- * receiver loses the projection between heartbeats (its target stays at the reported position until
- * its clock passes `sentAt`), so it corrects less, never wrongly.
+ * Where playback should be now (seconds): the position plus the time since `sentAt` while playing.
+ * Received states are stamped on arrival (`stampArrival`), so `sentAt` is always on this clock and
+ * there is no skew between two computers. A `sentAt` in the future (this clock stepped back) counts
+ * as no time: the position is a floor, never pulled back towards 0.
  */
 export function targetPosition(s: { playing: boolean; position: number; sentAt: number }, now: number): number {
   const elapsed = Math.max(0, now - s.sentAt);
@@ -38,8 +37,9 @@ type StateMessage = Extract<MediaMessage, { t: 'media-state' }>;
 function wins(s: MediaState, m: StateMessage, self?: Role): boolean {
   if (m.lamport !== s.lamport) return m.lamport > s.lamport;
   if (m.by === 'teacher' && s.by !== 'teacher') return true;
-  // Same person at the same counter: a heartbeat, ordered on that person's clock. My own state sent
-  // back to me (a reply at my counter) is stamped on the other clock, so it never wins.
+  // Same person at the same counter: a heartbeat, ordered by `sentAt` (its arrival time: the channel
+  // is reliable and ordered). My own state sent back to me (a reply at my counter) never wins: it is
+  // what I already have, stamped later.
   return m.by === s.by && m.by !== self && m.sentAt > s.sentAt;
 }
 
