@@ -136,3 +136,56 @@ describe('createSaveQueue concurrency', () => {
     q.dispose();
   });
 });
+
+describe('createSaveQueue edge cases', () => {
+  it('flush does not resolve until a chained save has settled, and reports its failure', async () => {
+    let calls = 0;
+    let settled = false;
+    const save = vi.fn(async () => {
+      calls += 1;
+      const n = calls;
+      await new Promise((r) => setTimeout(r, 100));
+      if (n === 2) {
+        settled = true;
+        throw new Error('offline');
+      }
+    });
+    const q = createSaveQueue({ save, backup: vi.fn(), onFailures: vi.fn(), delayMs: 10, retryMs: 100000 });
+    q.push({ n: 1 });
+    await vi.advanceTimersByTimeAsync(10); // scene 1 in flight
+    q.push({ n: 2 });
+    const result = q.flush();
+    let resolved: boolean | undefined;
+    void result.then((v) => (resolved = v));
+    await vi.advanceTimersByTimeAsync(100); // scene 1 done, scene 2 starts
+    expect(resolved).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(settled).toBe(true);
+    expect(resolved).toBe(false);
+    q.dispose();
+  });
+
+  it('survives a save that throws synchronously and a throwing onFailures', async () => {
+    let fail = true;
+    const save = vi.fn((): Promise<void> => {
+      if (fail) throw new Error('sync');
+      return Promise.resolve();
+    });
+    const q = createSaveQueue({
+      save,
+      backup: vi.fn(),
+      onFailures: () => {
+        throw new Error('ui');
+      },
+      delayMs: 10,
+      retryMs: 100,
+    });
+    q.push({ n: 1 });
+    await vi.advanceTimersByTimeAsync(10);
+    fail = false;
+    q.push({ n: 2 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(save).toHaveBeenLastCalledWith({ n: 2 });
+    q.dispose();
+  });
+});

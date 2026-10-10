@@ -11,7 +11,16 @@ describe('insertAtCursor', () => {
     expect(insertAtCursor('garcon', 3, 4, 'ç')).toEqual({ value: 'garçon', caret: 4 });
   });
 
-it('swaps a reversed range and clamps out-of-range values', () => {    expect(insertAtCursor('garcon', 4, 3, 'ç')).toEqual({ value: 'garçon', caret: 4 });    expect(insertAtCursor('abc', -5, 99, 'é')).toEqual({ value: 'é', caret: 1 });    expect(insertAtCursor('abc', 99, 99, 'é')).toEqual({ value: 'abcé', caret: 4 });  });  it('treats a missing start as the end', () => {    expect(insertAtCursor('abc', null, 1, 'é')).toEqual({ value: 'aébc', caret: 2 });  });
+  it('swaps a reversed range and clamps out-of-range values', () => {
+    expect(insertAtCursor('garcon', 4, 3, 'ç')).toEqual({ value: 'garçon', caret: 4 });
+    expect(insertAtCursor('abc', -5, 99, 'é')).toEqual({ value: 'é', caret: 1 });
+    expect(insertAtCursor('abc', 99, 99, 'é')).toEqual({ value: 'abcé', caret: 4 });
+  });
+
+  it('treats a missing start as the end', () => {
+    expect(insertAtCursor('abc', null, 1, 'é')).toEqual({ value: 'aébc', caret: 2 });
+  });
+
   it('appends when the caret is unknown', () => {
     expect(insertAtCursor('cafe', null, null, 'é')).toEqual({ value: 'cafeé', caret: 5 });
   });

@@ -30,7 +30,7 @@ export function createSaveQueue(opts: {
     hasPending = false;
     inFlight = (async () => {
       try {
-        await opts.save(scene);
+        await Promise.resolve().then(() => opts.save(scene));
         failures = 0;
       } catch {
         failures += 1;
@@ -39,7 +39,11 @@ export function createSaveQueue(opts: {
         } catch {
           // A failing backup must not stop the retry.
         }
-        opts.onFailures(failures);
+        try {
+          opts.onFailures(failures);
+        } catch {
+          // A failing UI callback must not stop the retry.
+        }
         // Retry the newest scene we have; a newer push replaces it.
         if (!hasPending) {
           pending = scene;
@@ -66,12 +70,16 @@ export function createSaveQueue(opts: {
       clearTimeout(timer);
       timer = undefined;
       for (;;) {
-        if (inFlight) await inFlight;
+        if (inFlight) {
+          await inFlight;
+          if (disposed || failures > 0) break;
+          continue; // a chained save may have started
+        }
         if (disposed || !hasPending) break;
         await run();
         if (failures > 0) break;
       }
-      return failures === 0 && !hasPending;
+      return failures === 0 && !hasPending && !inFlight;
     },
     dispose() {
       disposed = true;
