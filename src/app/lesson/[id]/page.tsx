@@ -14,7 +14,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   if (!member) redirect('/login?denied=1');
 
   const supabase = await createClient();
-  const { data: lesson, error } = await supabase.from('lessons').select('id, title, status').eq('id', id).maybeSingle();
+  const { data: lesson, error } = await supabase.from('lessons').select('id, title, status, started_at').eq('id', id).maybeSingle();
   // An outage goes to the error page, not to "not found".
   if (error) throw new Error('Could not load the lesson', { cause: error });
   if (!lesson) notFound();
@@ -30,5 +30,5 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  return <LessonClient lessonId={lesson.id} member={member} planBUrl={PLAN_B_URL} />;
+  return <LessonClient lessonId={lesson.id} member={member} planBUrl={PLAN_B_URL} startedAt={lesson.started_at} />;
 }

@@ -42,7 +42,17 @@ const STAGE_KEY: Record<Stage, MessageKey> = {
   media: 'stage.media',
 };
 
-export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; member: Member; planBUrl: string }) {
+export function RoomShell({
+  lessonId,
+  member,
+  planBUrl,
+  startedAt,
+}: {
+  lessonId: string;
+  member: Member;
+  planBUrl: string;
+  startedAt: string;
+}) {
   const t = useT();
   const room = useRoomContext();
   const { localParticipant, isScreenShareEnabled } = useLocalParticipant();
@@ -168,6 +178,7 @@ export function RoomShell({ lessonId, member, planBUrl }: { lessonId: string; me
       onToggleShare={() => void toggleShare()}
       onEnd={() => void onEnd()}
       planBUrl={planBUrl}
+      startedAt={startedAt}
       compact={compact}
     />
   );

@@ -4,6 +4,7 @@ import { useTrackToggle } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
 import { useT } from '@/lib/i18n/client';
+import { formatElapsed, isOvertime } from './timer';
 import { BoardIcon, CamIcon, CamOffIcon, EndIcon, MicIcon, MicOffIcon, PlanBIcon, ShareIcon } from './icons';
 
 const btn = 'flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-blue';
@@ -35,6 +36,27 @@ function IconButton({
   );
 }
 
+/** Own component so the 1 s tick re-renders only this pill, not the whole bar. */
+function LessonTimer({ startedAt }: { startedAt: string }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const started = Date.parse(startedAt);
+  const ms = Number.isNaN(started) ? 0 : now - started;
+  const time = formatElapsed(ms);
+  return (
+    <time
+      aria-label={t('bar.elapsed', { time })}
+      className={`px-1.5 text-xs [font-variant-numeric:tabular-nums] ${isOvertime(ms) ? 'font-semibold text-pen' : 'text-muted'}`}
+    >
+      {time}
+    </time>
+  );
+}
+
 export function ControlBar({
   screenSharing,
   boardActive,
@@ -42,6 +64,7 @@ export function ControlBar({
   onToggleShare,
   onEnd,
   planBUrl,
+  startedAt,
   compact = false,
 }: {
   screenSharing: boolean;
@@ -50,6 +73,7 @@ export function ControlBar({
   onToggleShare: () => void;
   onEnd: () => void;
   planBUrl: string;
+  startedAt: string;
   compact?: boolean;
 }) {
   const t = useT();
@@ -77,6 +101,7 @@ export function ControlBar({
           : 'flex items-center gap-1.5 border-t border-line bg-surface px-3 py-2'
       }
     >
+      <LessonTimer startedAt={startedAt} />
       <IconButton label={mic.enabled ? t('bar.mute') : t('bar.unmute')} onClick={() => void mic.toggle()}>
         {mic.enabled ? <MicIcon /> : <MicOffIcon />}
       </IconButton>

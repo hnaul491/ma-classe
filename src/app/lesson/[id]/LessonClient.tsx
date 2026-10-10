@@ -22,7 +22,17 @@ async function fetchToken(lessonId: string, t: TFn): Promise<{ token: string; ur
   throw new Error(t('join.noAnswer'));
 }
 
-export function LessonClient({ lessonId, member, planBUrl }: { lessonId: string; member: Member; planBUrl: string }) {
+export function LessonClient({
+  lessonId,
+  member,
+  planBUrl,
+  startedAt,
+}: {
+  lessonId: string;
+  member: Member;
+  planBUrl: string;
+  startedAt: string;
+}) {
   const router = useRouter();
   const t = useT();
   const [conn, setConn] = useState<{ token: string; url: string; choices: JoinChoices } | null>(null);
@@ -72,7 +82,7 @@ export function LessonClient({ lessonId, member, planBUrl }: { lessonId: string;
       }
       onDisconnected={onDisconnected}
     >
-      <RoomShell lessonId={lessonId} member={member} planBUrl={planBUrl} />
+      <RoomShell lessonId={lessonId} member={member} planBUrl={planBUrl} startedAt={startedAt} />
     </LiveKitRoom>
   );
 }

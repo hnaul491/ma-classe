@@ -111,6 +111,7 @@ export const en = {
   'board.resume': 'Resume following',
   'bar.board': 'Board',
   'bar.closeBoard': 'Back to cameras',
+  'bar.elapsed': 'Lesson time {time}',
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -226,6 +227,7 @@ export const fr: Record<MessageKey, string> = {
   'board.resume': 'Reprendre le suivi',
   'bar.board': 'Tableau',
   'bar.closeBoard': 'Retour aux caméras',
+  'bar.elapsed': 'Durée du cours {time}',
 };
 
 const DICTS: Record<Locale, Record<MessageKey, string>> = { en, fr };
