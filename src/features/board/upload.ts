@@ -25,7 +25,7 @@ export function isLessonPath(lessonId: string, path: string): boolean {
   return path.startsWith(prefix) && path.length > prefix.length && !path.split('/').includes('..');
 }
 
-export type RenderedPage ={ blob: Blob; width: number; height: number };
+export type RenderedPage = { blob: Blob; width: number; height: number };
 
 export async function uploadBoardImage(
   lessonId: string,

@@ -5,6 +5,12 @@ export function viewCenter(v: ViewState): { cx: number; cy: number } {
   return { cx: v.width / 2 / v.zoom - v.scrollX, cy: v.height / 2 / v.zoom - v.scrollY };
 }
 
+/** The viewport to broadcast, or null while the board is hidden and has no size. */
+export function viewportFor(v: ViewState): { cx: number; cy: number; zoom: number } | null {
+  if (v.width <= 0 || v.height <= 0) return null;
+  return { ...viewCenter(v), zoom: v.zoom };
+}
+
 export function scrollForCenter(
   c: { cx: number; cy: number },
   zoom: number,

@@ -9,7 +9,7 @@ import { useRoomContext } from '@livekit/components-react';
 import { RoomEvent, type RemoteParticipant } from 'livekit-client';
 import { useCallback, useEffect, useEffectEvent, useReducer, useRef, useState } from 'react';
 import { AccentBar } from '@/features/board/AccentBar';
-import { parseBackup } from '@/features/board/backup';
+import { parseBackup, shouldWriteBackup } from '@/features/board/backup';
 import { backupKey, loadBoard, saveBoard } from '@/features/board/persistence';
 import type { BoardElement, BoardMessage } from '@/features/board/protocol';
 import { imageToWebp, PageLimitError, renderPdf } from '@/features/board/render';
@@ -18,7 +18,7 @@ import { createDebounce, createThrottle, type Debounce, type Throttle } from '@/
 import { checkUpload, downloadAsDataURL, isLessonPath, uploadBoardImage, type RenderedPage } from '@/features/board/upload';
 import { useBoardChannel } from '@/features/board/useBoardChannel';
 import { adoptedElements, changedElements, markKnown, type KnownVersions } from '@/features/board/versions';
-import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter } from '@/features/board/view';
+import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, viewportFor } from '@/features/board/view';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { Member } from '@/lib/lessons/types';
@@ -82,10 +82,11 @@ function removeBackup(key: string) {
   }
 }
 
-function viewportOf(api: ExcalidrawImperativeAPI): BoardMessage {
+/** The current viewport message, or null while the board is hidden (zero size). */
+function viewportOf(api: ExcalidrawImperativeAPI): BoardMessage | null {
   const s = api.getAppState();
-  const c = viewCenter({ scrollX: s.scrollX, scrollY: s.scrollY, zoom: s.zoom.value, width: s.width, height: s.height });
-  return { t: 'viewport', cx: c.cx, cy: c.cy, zoom: s.zoom.value };
+  const v = viewportFor({ scrollX: s.scrollX, scrollY: s.scrollY, zoom: s.zoom.value, width: s.width, height: s.height });
+  return v && { t: 'viewport', ...v };
 }
 
 export default function Board({
@@ -111,6 +112,10 @@ export default function Board({
   const latest = useRef<readonly OrderedExcalidrawElement[]>([]);
   /** True once the saved board is loaded; until then nothing is saved, so a partial scene never overwrites it. */
   const loaded = useRef(false);
+  /** True once the localStorage backup is in the scene (after a failed load), so pagehide may replace it. */
+  const backupMerged = useRef(false);
+  const loadFailed = useRef(false);
+  const mounted = useRef(true);
   const queue = useRef<SaveQueue | null>(null);
   const elementSender = useRef<Debounce | null>(null);
   const viewportSender = useRef<Throttle<null> | null>(null);
@@ -172,9 +177,11 @@ export default function Board({
           { to: [from] },
         ).catch(() => {});
         break;
-      case 'viewport-req':
-        if (!isStudent) void sendRef.current?.(viewportOf(api), { to: [from] }).catch(() => {});
+      case 'viewport-req': {
+        const vp = isStudent ? null : viewportOf(api);
+        if (vp) void sendRef.current?.(vp, { to: [from] }).catch(() => {});
         break;
+      }
       case 'file':
         if (isLessonPath(lessonId, msg.path)) void addFileFromStorage(msg.fileId, msg.path, msg.mime).catch(() => {});
         break;
@@ -230,6 +237,8 @@ export default function Board({
       SEND_MAX_WAIT_MS,
     );
     const onPageHide = () => {
+      // Never replace an older backup with a scene that does not contain it.
+      if (!shouldWriteBackup({ loaded: loaded.current, backupMerged: backupMerged.current })) return;
       if (latest.current.length > 0) writeBackup(key, { elements: latest.current });
     };
     window.addEventListener('pagehide', onPageHide);
@@ -258,7 +267,10 @@ export default function Board({
     if (!isStudent) {
       // Leading send is lossy; the trailing one carries the final position reliably.
       const vp = createThrottle<null>(
-        (_, kind) => void send(viewportOf(api), { lossy: kind === 'leading' }).catch(() => {}),
+        (_, kind) => {
+          const vp = viewportOf(api);
+          if (vp) void send(vp, { lossy: kind === 'leading' }).catch(() => {});
+        },
         VIEWPORT_EVERY_MS,
         { alwaysTrailing: true },
       );
@@ -277,47 +289,86 @@ export default function Board({
     };
   }, [api, isStudent, send]);
 
-  // First load: the saved scene, its images and any local backup; then ask the other person for anything newer.
   useEffect(() => {
-    if (!api) return;
-    let cancelled = false;
-    loaded.current = false;
-    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
-    (async () => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  /**
+   * Loads the saved scene, its images and any local backup. On failure, the backup is still merged
+   * locally (not saved), so a later pagehide cannot replace it with less. The caller reports 'failed'.
+   */
+  const loadScene = useCallback(
+    async (isCancelled: () => boolean): Promise<'loaded' | 'failed' | 'cancelled'> => {
+      if (!api) return 'cancelled';
+      const key = backupKey(lessonId);
       try {
         const saved = await loadBoard(lessonId);
-        if (cancelled) return;
+        if (isCancelled()) return 'cancelled';
         await Promise.all(saved.files.map((f) => addFileFromStorage(f.id, f.storage_path, f.mime).catch(() => {})));
-        if (cancelled) return;
+        if (isCancelled()) return 'cancelled';
         if (saved.elements.length > 0) applyRemote(saved.elements);
         loaded.current = true;
-        const backup = readBackup(backupKey(lessonId));
+        loadFailed.current = false;
+        const backup = readBackup(key);
         if (backup) {
           applyRemote(backup); // also pushes the merged scene to the save queue
+          backupMerged.current = true;
           const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
           markKnown(known.current, all);
           void send({ t: 'elements', elements: all }).catch(() => {});
         }
+        return 'loaded';
       } catch {
-        if (cancelled) return;
-        reportError('board.loadFailed');
+        if (isCancelled()) return 'cancelled';
+        loadFailed.current = true;
+        if (!backupMerged.current) {
+          const backup = readBackup(key);
+          if (backup) applyRemote(backup); // not saved: loaded is still false
+          backupMerged.current = true;
+        }
+        return 'failed';
       }
+    },
+    [api, lessonId, addFileFromStorage, applyRemote, send],
+  );
+
+  // First load; then ask the other person for anything newer.
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    loaded.current = false;
+    backupMerged.current = false;
+    loadFailed.current = false;
+    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
+    void loadScene(() => cancelled).then((result) => {
+      if (cancelled) return;
+      if (result === 'failed') reportError('board.loadFailed');
       void send({ t: 'scene-req' }).catch(() => {});
-    })();
+    });
     return () => {
       cancelled = true;
     };
-  }, [api, lessonId, isStudent, addFileFromStorage, applyRemote, send]);
+  }, [api, isStudent, loadScene, send]);
 
   // After a reconnect: catch up both ways, save, and re-sync the follow view.
   const onReconnected = useEffectEvent(() => {
     if (!api) return;
-    void send({ t: 'scene-req' }).catch(() => {});
-    const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
-    markKnown(known.current, all);
-    void send({ t: 'elements', elements: all }).catch(() => {});
-    if (loaded.current) queue.current?.push({ elements: all });
-    if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
+    void (async () => {
+      // A failed first load disables saving; retry it now that the connection is back.
+      if (!loaded.current && loadFailed.current && (await loadScene(() => !mounted.current)) === 'failed') {
+        reportError('board.loadFailed');
+      }
+      if (!mounted.current) return;
+      void send({ t: 'scene-req' }).catch(() => {});
+      const all = api.getSceneElementsIncludingDeleted() as unknown as BoardElement[];
+      markKnown(known.current, all);
+      void send({ t: 'elements', elements: all }).catch(() => {});
+      if (loaded.current) queue.current?.push({ elements: all });
+      if (isStudent) void send({ t: 'viewport-req' }).catch(() => {});
+    })();
   });
   const onPeerLeft = useEffectEvent((p: RemoteParticipant) => {
     if (!collaborators.current.delete(p.identity as SocketId)) return;
@@ -334,10 +385,13 @@ export default function Board({
     };
   }, [room]);
 
-  // A hidden Excalidraw has zero size; re-measure when it becomes visible.
+  // A hidden Excalidraw has zero size; re-measure when it becomes visible, and (teacher) send the view
+  // that was skipped while hidden. The throttle's reliable trailing send reads the re-measured size.
   useEffect(() => {
-    if (visible) api?.refresh();
-  }, [visible, api]);
+    if (!visible || !api) return;
+    api.refresh();
+    if (!isStudent) viewportSender.current?.call(null);
+  }, [visible, api, isStudent]);
 
   const onChange = useCallback((elements: readonly OrderedExcalidrawElement[]) => {
     latest.current = elements;

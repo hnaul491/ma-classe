@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, type FollowState } from './view';
+import { countPageFrames, followReducer, layoutPages, sceneBottom, scrollForCenter, viewCenter, viewportFor, type FollowState } from './view';
+
+describe('viewportFor', () => {
+  it('gives the centre and zoom of a visible board', () => {
+    expect(viewportFor({ scrollX: -100, scrollY: 50, zoom: 2, width: 1200, height: 800 })).toEqual({ cx: 400, cy: 150, zoom: 2 });
+  });
+
+  it('is null while the board is hidden (zero size)', () => {
+    expect(viewportFor({ scrollX: 0, scrollY: 0, zoom: 1, width: 0, height: 800 })).toBeNull();
+    expect(viewportFor({ scrollX: 0, scrollY: 0, zoom: 1, width: 1200, height: 0 })).toBeNull();
+  });
+});
 
 describe('viewCenter / scrollForCenter', () => {
   it('round-trips between screen sizes', () => {

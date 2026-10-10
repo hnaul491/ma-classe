@@ -1,5 +1,13 @@
 import { isBoardElement, type BoardElement } from './protocol';
 
+/**
+ * A backup may only be (over)written once the scene contains everything the old backup could hold:
+ * either the saved board was loaded, or the old backup was merged in after a failed load.
+ */
+export function shouldWriteBackup(s: { loaded: boolean; backupMerged: boolean }): boolean {
+  return s.loaded || s.backupMerged;
+}
+
 /** Elements from a localStorage board backup, or null when there is none or it is malformed. */
 export function parseBackup(raw: string | null): BoardElement[] | null {
   if (!raw) return null;
